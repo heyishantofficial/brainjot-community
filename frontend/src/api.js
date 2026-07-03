@@ -1,7 +1,12 @@
 import axios from 'axios';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/+$/, '');
+// The main app's FRONTEND (login page, dashboard) — used for links/redirects only.
 export const MAIN_APP_URL = (import.meta.env.VITE_MAIN_APP_URL || 'https://app.brainjot.space').replace(/\/+$/, '');
+// The main app's BACKEND API — a separate Vercel project/domain from the
+// frontend above. This is the one that actually serves /api/community/sso-token.
+// Falls back to MAIN_APP_URL for setups where frontend+backend share one origin.
+export const MAIN_API_URL = (import.meta.env.VITE_MAIN_API_URL || MAIN_APP_URL).replace(/\/+$/, '');
 
 // withCredentials → the community session cookie rides along on every request.
 export const api = axios.create({ baseURL: API_URL + '/api', withCredentials: true });
@@ -22,7 +27,7 @@ export async function bootstrapSession() {
   }
 
   try {
-    const tokenRes = await axios.get(`${MAIN_APP_URL}/api/community/sso-token`, { withCredentials: true });
+    const tokenRes = await axios.get(`${MAIN_API_URL}/api/community/sso-token`, { withCredentials: true });
     const token = tokenRes.data?.token;
     if (!token) return null;
     const { data } = await api.post('/auth/sso-login', { token });
