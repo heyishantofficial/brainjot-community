@@ -248,15 +248,32 @@ a { color: inherit; text-decoration: none; }
 .post-card__media.media-count-2 { grid-template-columns: 1fr 1fr; }
 .post-card__media.media-count-3, .post-card__media.media-count-4 { grid-template-columns: 1fr 1fr; }
 .post-card__img { width: 100%; max-height: 340px; object-fit: cover; display: block; }
+.post-card__files { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.post-card__file { display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px; background: var(--bg-elev2); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--text); max-width: 320px; }
+.post-card__file:hover { border-color: var(--accent); color: var(--accent); }
 
-/* ── Composer image upload ── */
-.composer__images { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.img-thumb { position: relative; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; }
-.img-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.img-thumb--busy { opacity: 0.5; }
-.img-thumb__remove { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.65); color: #fff; border: none; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-.img-add { width: 64px; height: 64px; border-radius: 8px; border: 1.5px dashed rgba(127,127,127,0.45); background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: inherit; opacity: 0.7; }
-.img-add:hover { opacity: 1; }
+/* ── Composer: unified title/body/topics box ───────────────────────────── */
+.composer__unified { border: 1px solid var(--border); border-radius: 12px; background: var(--bg); overflow: hidden; }
+.composer__field { display: block; width: 100%; border: none; background: none; color: var(--text); font-family: inherit; }
+.composer__field:focus { outline: none; }
+.composer__field--title { padding: 14px 16px 10px; font-size: 16px; font-weight: 700; }
+.composer__field--body { padding: 2px 16px 12px; font-size: 14px; resize: vertical; line-height: 1.5; }
+.composer__field--topics { padding: 11px 16px; font-size: 13px; }
+.composer__divider { height: 1px; background: var(--border); margin: 0; }
+.composer__char-count { display: block; padding: 0 16px 8px; }
+.composer__attach-row { padding: 8px 12px 12px; }
+.composer__attach-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--bg-elev2); border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.composer__attach-btn:hover { color: var(--text); }
+.composer__attach-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Attachments (shared: composer preview + post card render) ─────────── */
+.composer__attachments { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 12px 10px; }
+.attach-chip { position: relative; border-radius: 8px; overflow: hidden; }
+.attach-chip img { width: 64px; height: 64px; object-fit: cover; display: block; }
+.attach-chip--busy { opacity: 0.5; }
+.attach-chip__file { display: flex; align-items: center; gap: 6px; width: 150px; height: 64px; padding: 0 10px; background: var(--bg-elev2); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text); }
+.attach-chip__file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-chip__remove { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.65); color: #fff; border: none; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 
 /* ── Topic follow star ── */
 .topic-pill { display: flex; align-items: center; }

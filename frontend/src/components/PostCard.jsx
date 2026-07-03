@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MessageSquare, Send, Bookmark } from 'lucide-react';
+import { MessageSquare, Send, Bookmark, FileText } from 'lucide-react';
 import Avatar from './Avatar';
 import VoteButtons from './VoteButtons';
 import CollabMeta from './CollabMeta';
@@ -14,6 +14,8 @@ export default function PostCard({ post, compact = true }) {
   const [saved, setSaved] = useState(!!post.mySaved);
   const tm = typeMeta(post.type);
   const isCollab = post.type === 'collab';
+  const images = post.media?.filter((m) => m.type !== 'file') || [];
+  const files = post.media?.filter((m) => m.type === 'file') || [];
 
   async function toggleSave(e) {
     e.preventDefault();
@@ -58,10 +60,20 @@ export default function PostCard({ post, compact = true }) {
           <div className="post-card__content" dangerouslySetInnerHTML={{ __html: cleanHtml(post.body) }} />
         )}
 
-        {post.media?.length > 0 && (
-          <div className={`post-card__media media-count-${Math.min(post.media.length, 4)}`}>
-            {post.media.slice(0, 4).map((m, i) => (
+        {images.length > 0 && (
+          <div className={`post-card__media media-count-${Math.min(images.length, 4)}`}>
+            {images.slice(0, 4).map((m, i) => (
               <img key={i} src={m.url} alt="" loading="lazy" className="post-card__img" />
+            ))}
+          </div>
+        )}
+
+        {files.length > 0 && (
+          <div className="post-card__files">
+            {files.map((m, i) => (
+              <a key={i} href={m.url} target="_blank" rel="noreferrer" className="post-card__file" onClick={(e) => e.stopPropagation()}>
+                <FileText size={15} /> {m.name || 'Document.pdf'}
+              </a>
             ))}
           </div>
         )}

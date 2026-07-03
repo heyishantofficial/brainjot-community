@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, ImagePlus } from 'lucide-react';
+import { X, Paperclip, FileText } from 'lucide-react';
 import axios from 'axios';
 import { api } from '../api';
 import { BODY_MAX } from '../utils';
@@ -20,6 +20,9 @@ const TYPES = [
   { value: 'collab', label: '🤝 Collab / Hiring' },
 ];
 
+const ACCEPTED_TYPES = 'image/jpeg,image/png,image/webp,image/gif,application/pdf';
+const MAX_ATTACHMENTS = 4;
+
 // Create-post modal. When type === 'collab' the structured collab fields appear
 // (role, skills, compensation, commitment) — the "detailed" collab post.
 export default function Composer({ onClose, onCreated }) {
@@ -34,27 +37,33 @@ export default function Composer({ onClose, onCreated }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [uploadsEnabled, setUploadsEnabled] = useState(false);
-  const [images, setImages] = useState([]); // [{url, uploading}]
+  // [{ url, uploading, kind: 'image'|'file', name }]
+  const [attachments, setAttachments] = useState([]);
   const fileRef = useRef(null);
 
   useEffect(() => { getConfig().then((c) => setUploadsEnabled(!!c.uploads)); }, []);
 
-  async function pickImages(e) {
-    const files = [...(e.target.files || [])].slice(0, 4 - images.length);
+  async function pickFiles(e) {
+    const files = [...(e.target.files || [])].slice(0, MAX_ATTACHMENTS - attachments.length);
     e.target.value = '';
     for (const file of files) {
-      if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) { setError('Only JPEG, PNG, WebP or GIF images.'); continue; }
-      if (file.size > 5 * 1024 * 1024) { setError('Images must be under 5MB.'); continue; }
-      const placeholder = { url: URL.createObjectURL(file), uploading: true };
-      setImages((prev) => [...prev, placeholder]);
+      const isImage = /^image\/(jpeg|png|webp|gif)$/.test(file.type);
+      const isPdf = file.type === 'application/pdf';
+      if (!isImage && !isPdf) { setError('Only JPEG, PNG, WebP, GIF images or PDF documents are allowed.'); continue; }
+      const maxBytes = isPdf ? 15 * 1024 * 1024 : 5 * 1024 * 1024;
+      if (file.size > maxBytes) { setError(`File is too large (max ${isPdf ? '15MB' : '5MB'}).`); continue; }
+
+      const kind = isImage ? 'image' : 'file';
+      const placeholder = { url: isImage ? URL.createObjectURL(file) : '', uploading: true, kind, name: file.name };
+      setAttachments((prev) => [...prev, placeholder]);
       try {
         const { data } = await api.post('/uploads/sign', { type: file.type, size: file.size });
         // Raw axios (no cookies) — the presigned URL is the credential.
         await axios.put(data.uploadUrl, file, { headers: { 'Content-Type': file.type } });
-        setImages((prev) => prev.map((im) => (im === placeholder ? { url: data.publicUrl, uploading: false } : im)));
+        setAttachments((prev) => prev.map((a) => (a === placeholder ? { ...a, url: data.publicUrl, uploading: false } : a)));
       } catch {
-        setImages((prev) => prev.filter((im) => im !== placeholder));
-        setError('Image upload failed. Try again.');
+        setAttachments((prev) => prev.filter((a) => a !== placeholder));
+        setError('Upload failed. Try again.');
       }
     }
   }
@@ -65,14 +74,14 @@ export default function Composer({ onClose, onCreated }) {
     setSubmitting(true);
     setError('');
     try {
-      if (images.some((im) => im.uploading)) { setSubmitting(false); return setError('Wait for images to finish uploading.'); }
+      if (attachments.some((a) => a.uploading)) { setSubmitting(false); return setError('Wait for attachments to finish uploading.'); }
       const payload = {
         type,
         title: title.trim(),
         // Minimal rich text: wrap newlines as paragraphs. (A full editor is a fast-follow.)
         body: body.trim() ? body.trim().split(/\n{2,}/).map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('') : '',
         topics: topics.split(',').map((t) => t.trim()).filter(Boolean),
-        media: images.filter((im) => !im.uploading).map((im) => ({ url: im.url, type: 'image' })),
+        media: attachments.filter((a) => !a.uploading).map((a) => ({ url: a.url, type: a.kind, name: a.name })),
       };
       if (type === 'collab') {
         payload.collab = { ...collab, skills: collab.skills.split(',').map((s) => s.trim()).filter(Boolean) };
@@ -103,31 +112,47 @@ export default function Composer({ onClose, onCreated }) {
             ))}
           </div>
 
-          <input className="input" placeholder="Title" value={title} maxLength={300}
-            onChange={(e) => setTitle(e.target.value)} autoFocus />
+          {/* Title, body, and topics live in one unified box instead of three
+              separately-bordered fields — reads as a single composer, not a form. */}
+          <div className="composer__unified">
+            <input className="composer__field composer__field--title" placeholder="Title" value={title}
+              maxLength={300} onChange={(e) => setTitle(e.target.value)} autoFocus />
+            <div className="composer__divider" />
+            <textarea className="composer__field composer__field--body" placeholder="Say something… (optional)"
+              rows={4} value={body} maxLength={BODY_MAX} onChange={(e) => setBody(e.target.value)} />
+            {body.length > BODY_MAX - 100 && (
+              <span className="muted char-count composer__char-count">{BODY_MAX - body.length} characters left</span>
+            )}
 
-          <textarea className="input textarea" placeholder="Say something… (optional)" rows={5}
-            value={body} maxLength={BODY_MAX} onChange={(e) => setBody(e.target.value)} />
-          {body.length > BODY_MAX - 100 && (
-            <span className="muted char-count">{BODY_MAX - body.length} characters left</span>
-          )}
+            {uploadsEnabled && attachments.length > 0 && (
+              <div className="composer__attachments">
+                {attachments.map((a, i) => (
+                  <div key={i} className={`attach-chip ${a.uploading ? 'attach-chip--busy' : ''}`}>
+                    {a.kind === 'image' ? (
+                      <img src={a.url} alt="" />
+                    ) : (
+                      <div className="attach-chip__file"><FileText size={20} /><span>{a.name}</span></div>
+                    )}
+                    <button type="button" className="attach-chip__remove" onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}><X size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
 
-          {uploadsEnabled && (
-            <div className="composer__images">
-              {images.map((im, i) => (
-                <div key={i} className={`img-thumb ${im.uploading ? 'img-thumb--busy' : ''}`}>
-                  <img src={im.url} alt="" />
-                  <button type="button" className="img-thumb__remove" onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}><X size={12} /></button>
-                </div>
-              ))}
-              {images.length < 4 && (
-                <button type="button" className="img-add" onClick={() => fileRef.current?.click()} title="Add images">
-                  <ImagePlus size={18} />
+            <div className="composer__divider" />
+            <input className="composer__field composer__field--topics" placeholder="Topics, comma separated (e.g. design, hiring)"
+              value={topics} onChange={(e) => setTopics(e.target.value)} />
+
+            {uploadsEnabled && (
+              <div className="composer__attach-row">
+                <button type="button" className="composer__attach-btn" onClick={() => fileRef.current?.click()}
+                  disabled={attachments.length >= MAX_ATTACHMENTS} title="Add photos or a PDF">
+                  <Paperclip size={16} /> Photo / PDF
                 </button>
-              )}
-              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden onChange={pickImages} />
-            </div>
-          )}
+                <input ref={fileRef} type="file" accept={ACCEPTED_TYPES} multiple hidden onChange={pickFiles} />
+              </div>
+            )}
+          </div>
 
           {type === 'collab' && (
             <div className="collab-fields">
@@ -168,9 +193,6 @@ export default function Composer({ onClose, onCreated }) {
               )}
             </div>
           )}
-
-          <input className="input" placeholder="Topics, comma separated (e.g. design, hiring)"
-            value={topics} onChange={(e) => setTopics(e.target.value)} />
 
           {error && <p className="error-text">{error}</p>}
 

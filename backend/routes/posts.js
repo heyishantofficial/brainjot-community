@@ -286,7 +286,8 @@ function sanitizeMedia(media) {
   if (!Array.isArray(media)) return [];
   return media.slice(0, 6).map((m) => ({
     url: sanitizeText(m.url, 1000),
-    type: m.type === 'link' ? 'link' : 'image',
+    type: ['image', 'file', 'link'].includes(m.type) ? m.type : 'image',
+    name: sanitizeText(m.name, 150), // original filename, used for 'file' (PDFs)
     width: Number(m.width) || undefined,
     height: Number(m.height) || undefined,
     // http(s) only — blocks javascript:/data: URLs from ever being stored, so no

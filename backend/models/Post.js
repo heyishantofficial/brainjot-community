@@ -13,7 +13,8 @@ const authorSnapshot = {
 
 const mediaSchema = new mongoose.Schema({
   url: String,
-  type: { type: String, enum: ['image', 'link'], default: 'image' },
+  type: { type: String, enum: ['image', 'file', 'link'], default: 'image' },
+  name: { type: String, default: '' }, // original filename, shown for 'file' (e.g. PDFs)
   width: Number,
   height: Number,
 }, { _id: false });
