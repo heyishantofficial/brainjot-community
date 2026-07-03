@@ -47,7 +47,7 @@ export function profilePath(user) {
 export const BODY_MAX = 500;
 
 const TYPE_LABELS = {
-  discussion: { label: 'Discussion', color: '#6366f1' },
+  discussion: { label: 'Discussion', color: '#3b82f6' },
   showcase: { label: 'Showcase', color: '#10b981' },
   question: { label: 'Question', color: '#f59e0b' },
   collab: { label: 'Collab', color: '#ec4899' },

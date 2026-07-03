@@ -1,12 +1,15 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Flame, Clock, Sparkles, Star } from 'lucide-react';
 import PostCard from '../components/PostCard';
+import Composer from '../components/Composer';
+import Avatar from '../components/Avatar';
 import { api } from '../api';
 import { useAuth } from '../auth';
 
 export default function Feed() {
-  const { user, setUser } = useAuth();
+  const { user, setUser, login } = useAuth();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const sort = params.get('sort') || 'hot';
   const feed = params.get('feed') || '';
@@ -17,6 +20,7 @@ export default function Feed() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [topics, setTopics] = useState([]);
+  const [composing, setComposing] = useState(false);
 
   const followed = user?.followedTopics || [];
 
@@ -55,24 +59,6 @@ export default function Feed() {
 
   return (
     <div className="feed-layout">
-      <div className="feed-main">
-        <div className="feed-tabs">
-          <button className={`tab ${sort === 'hot' && !feed ? 'active' : ''}`} onClick={() => setTab({ nextSort: 'hot' })}><Flame size={16} /> Trending</button>
-          <button className={`tab ${sort === 'new' && !feed ? 'active' : ''}`} onClick={() => setTab({ nextSort: 'new' })}><Clock size={16} /> Latest</button>
-          {user && followed.length > 0 && (
-            <button className={`tab ${feed === 'foryou' ? 'active' : ''}`} onClick={() => setTab({ nextSort: 'hot', nextFeed: 'foryou' })}><Sparkles size={16} /> For you</button>
-          )}
-          {topic && <span className="active-topic">#{topic} <button onClick={() => { const p = new URLSearchParams(params); p.delete('topic'); setParams(p); }}>×</button></span>}
-        </div>
-
-        {posts.map((p) => <PostCard key={p.id} post={p} />)}
-        {loading && posts.length === 0 && <div className="skeleton-list">{[...Array(4)].map((_, i) => <div key={i} className="skeleton-card" />)}</div>}
-        {!loading && posts.length === 0 && (
-          <p className="empty muted">{feed === 'foryou' ? 'No recent posts in your followed topics.' : 'No posts yet — be the first to post.'}</p>
-        )}
-        {hasMore && <button className="btn btn--ghost load-more" onClick={() => load(false)} disabled={loading}>{loading ? 'Loading…' : 'Load more'}</button>}
-      </div>
-
       <aside className="feed-side">
         <div className="side-card">
           <h3>Topics</h3>
@@ -99,6 +85,31 @@ export default function Feed() {
           <a href="/collab" className="btn btn--ghost btn--block">Browse collab board</a>
         </div>
       </aside>
+
+      <div className="feed-main">
+        <button className="mind-box" onClick={() => (user ? setComposing(true) : login())}>
+          <Avatar user={user} size={40} />
+          <span className="mind-box__text">Share What's Going On. Someone here might relate more than you think</span>
+        </button>
+
+        <div className="feed-tabs">
+          <button className={`tab ${sort === 'hot' && !feed ? 'active' : ''}`} onClick={() => setTab({ nextSort: 'hot' })}><Flame size={16} /> Trending</button>
+          <button className={`tab ${sort === 'new' && !feed ? 'active' : ''}`} onClick={() => setTab({ nextSort: 'new' })}><Clock size={16} /> Latest</button>
+          {user && followed.length > 0 && (
+            <button className={`tab ${feed === 'foryou' ? 'active' : ''}`} onClick={() => setTab({ nextSort: 'hot', nextFeed: 'foryou' })}><Sparkles size={16} /> For you</button>
+          )}
+          {topic && <span className="active-topic">#{topic} <button onClick={() => { const p = new URLSearchParams(params); p.delete('topic'); setParams(p); }}>×</button></span>}
+        </div>
+
+        {posts.map((p) => <PostCard key={p.id} post={p} />)}
+        {loading && posts.length === 0 && <div className="skeleton-list">{[...Array(4)].map((_, i) => <div key={i} className="skeleton-card" />)}</div>}
+        {!loading && posts.length === 0 && (
+          <p className="empty muted">{feed === 'foryou' ? 'No recent posts in your followed topics.' : 'No posts yet — be the first to post.'}</p>
+        )}
+        {hasMore && <button className="btn btn--ghost load-more" onClick={() => load(false)} disabled={loading}>{loading ? 'Loading…' : 'Load more'}</button>}
+      </div>
+
+      {composing && <Composer onClose={() => setComposing(false)} onCreated={(p) => { setComposing(false); navigate(`/post/${p.id}`); }} />}
     </div>
   );
 }
