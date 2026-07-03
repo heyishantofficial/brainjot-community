@@ -1,0 +1,75 @@
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import Layout from './components/Layout';
+import Feed from './pages/Feed';
+import PostDetail from './pages/PostDetail';
+import CollabBoard from './pages/CollabBoard';
+import Profile from './pages/Profile';
+import Inbox from './pages/Inbox';
+import Conversation from './pages/Conversation';
+import Notifications from './pages/Notifications';
+import Search from './pages/Search';
+import Saved from './pages/Saved';
+import { AuthProvider, useAuth } from './auth';
+import { api } from './api';
+
+function Shell() {
+  const { user, loading } = useAuth();
+  const [badges, setBadges] = useState({ notifications: 0, messages: 0 });
+
+  // One combined badge poll (unread DMs + unread notifications) every 30s while
+  // visible, slower when hidden, refreshed on tab focus and whenever a page
+  // dispatches 'badges:refresh' (e.g. after marking notifications read).
+  useEffect(() => {
+    if (!user) { setBadges({ notifications: 0, messages: 0 }); return; }
+    let timer; let cancelled = false;
+    async function refresh() {
+      try {
+        const { data } = await api.get('/notifications/badges');
+        if (!cancelled) setBadges({ notifications: data.notifications, messages: data.messages });
+      } catch { /* ignore transient errors */ }
+      if (!cancelled) timer = setTimeout(refresh, document.hidden ? 90000 : 30000);
+    }
+    refresh();
+    const onFocus = () => refresh();
+    const onManual = () => refresh();
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('badges:refresh', onManual);
+    return () => {
+      cancelled = true; clearTimeout(timer);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('badges:refresh', onManual);
+    };
+  }, [user]);
+
+  if (loading) {
+    return <div className="boot"><div className="brand">brainjot<span className="brand__accent">/community</span></div><p className="muted">Loading…</p></div>;
+  }
+
+  return (
+    <Layout badges={badges}>
+      <Routes>
+        <Route path="/" element={<Feed />} />
+        <Route path="/collab" element={<CollabBoard />} />
+        <Route path="/post/:id" element={<PostDetail />} />
+        <Route path="/u/:username" element={<Profile />} />
+        <Route path="/messages" element={<Inbox />} />
+        <Route path="/messages/:id" element={<Conversation />} />
+        <Route path="/notifications" element={<Notifications />} />
+        <Route path="/search" element={<Search />} />
+        <Route path="/saved" element={<Saved />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Layout>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Shell />
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
