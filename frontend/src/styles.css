@@ -39,7 +39,11 @@ a { color: inherit; text-decoration: none; }
 .topbar__left, .topbar__right { display: flex; align-items: center; gap: 10px; }
 .brand { font-weight: 800; font-size: 18px; letter-spacing: -.3px; }
 .brand__accent { color: var(--accent); font-weight: 600; }
-.backlink { color: var(--muted); display: flex; padding: 6px; border-radius: 8px; }
+.backlink {
+  color: var(--muted); display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
 .backlink:hover { background: var(--bg-elev); color: var(--text); }
 
 /* ── Buttons ────────────────────────────────────────────── */
@@ -290,6 +294,38 @@ a { color: inherit; text-decoration: none; }
 .post-filters { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { border: 1px solid rgba(127,127,127,0.3); background: none; color: inherit; border-radius: 14px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; }
 .chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.profile__headline { margin: 2px 0 4px; font-size: 15px; color: #c7ccd6; }
+.profile__open-to { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.open-to-badge {
+  font-size: 12px; font-weight: 700; color: var(--success, #34d399);
+  border: 1px solid color-mix(in srgb, var(--success, #34d399) 40%, transparent);
+  padding: 3px 10px; border-radius: 20px;
+}
+.profile__links { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.profile__link {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600;
+  color: var(--muted); border: 1px solid var(--border); border-radius: 18px; padding: 4px 11px;
+}
+.profile__link:hover { color: var(--accent); border-color: var(--accent); }
+.profile__about .profile__bio { white-space: pre-wrap; margin: 0; color: #c7ccd6; }
+.profile__timeline { margin-top: 18px; }
+.timeline-entry { padding: 10px 0 10px 14px; border-left: 2px solid var(--border); margin-left: 4px; }
+.timeline-entry__head { font-size: 14px; }
+.timeline-entry__dates { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.timeline-entry__desc { margin: 6px 0 0; font-size: 13.5px; }
+
+/* ── Profile edit modal ─────────────────────────────────── */
+.profile-edit { max-width: 620px; }
+.profile-edit__form { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; max-height: 75vh; overflow-y: auto; }
+.profile-edit__label { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); margin-top: 6px; }
+.profile-edit__about { resize: vertical; min-height: 90px; }
+.profile-edit__links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.profile-edit__section-head { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.profile-edit__section-head .profile-edit__label { margin-top: 0; }
+.profile-edit__entry { display: flex; flex-direction: column; gap: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px; }
+.profile-edit__entry .input { background: var(--bg-elev); }
+@media (max-width: 640px) { .profile-edit__links { grid-template-columns: 1fr; } }
+
 .profile__endorsements { margin-top: 18px; }
 .profile__muted-words { margin-top: 18px; }
 .profile__muted-words .muted { font-size: 13px; margin: -8px 0 10px; }

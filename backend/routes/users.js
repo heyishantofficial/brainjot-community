@@ -116,8 +116,13 @@ router.get('/:handle', readLimiter, optionalAuth, async (req, res, next) => {
         name: user.name,
         username: user.username,
         avatarUrl: user.avatarUrl || '',
+        headline: user.headline || '',
         bio: user.bio || '',
         skills: user.skills || [],
+        links: user.links || {},
+        experience: user.experience || [],
+        education: user.education || [],
+        openTo: user.openTo || [],
         karma: user.karma || 0,
         postCount: user.postCount || 0,
         createdAt: user.createdAt,
@@ -133,13 +138,52 @@ router.get('/:handle', readLimiter, optionalAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Normalize a user-supplied link: plain text only, force http(s), must parse as
+// a URL. Anything suspicious collapses to '' rather than erroring the whole save.
+function sanitizeLink(raw) {
+  let url = sanitizeText(raw, 200);
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  try { new URL(url); return url; } catch { return ''; }
+}
+
+// Shared shape for experience/education entries; `required` names the field an
+// entry must have to be kept at all (dropping blank rows the UI sends).
+function sanitizeEntries(raw, fields, required) {
+  if (!Array.isArray(raw)) return undefined;
+  return raw
+    .map((e) => {
+      const entry = {};
+      for (const [key, max] of Object.entries(fields)) entry[key] = sanitizeText(e?.[key], max);
+      return entry;
+    })
+    .filter((e) => e[required])
+    .slice(0, 10);
+}
+
+const OPEN_TO = ['collabs', 'hire'];
+
 // ── PATCH /api/users/me — edit community-local profile fields ────────────────
 router.patch('/me/profile', writeLimiter, requireAuth, async (req, res, next) => {
   try {
-    const { bio, skills, mutedKeywords } = req.body || {};
+    const { headline, bio, skills, links, experience, education, openTo, mutedKeywords } = req.body || {};
     const update = {};
-    if (bio !== undefined) update.bio = sanitizeText(bio, 280);
+    if (headline !== undefined) update.headline = sanitizeText(headline, 100);
+    if (bio !== undefined) update.bio = sanitizeText(bio, 1000);
     if (Array.isArray(skills)) update.skills = skills.map((s) => sanitizeText(s, 40)).filter(Boolean).slice(0, 15);
+    if (links && typeof links === 'object') {
+      update.links = {
+        website: sanitizeLink(links.website),
+        github: sanitizeLink(links.github),
+        twitter: sanitizeLink(links.twitter),
+        linkedin: sanitizeLink(links.linkedin),
+      };
+    }
+    const exp = sanitizeEntries(experience, { title: 80, org: 80, start: 20, end: 20, description: 300 }, 'title');
+    if (exp) update.experience = exp;
+    const edu = sanitizeEntries(education, { school: 80, degree: 80, start: 20, end: 20, description: 300 }, 'school');
+    if (edu) update.education = edu;
+    if (Array.isArray(openTo)) update.openTo = openTo.filter((v) => OPEN_TO.includes(v));
     if (Array.isArray(mutedKeywords)) {
       // Lowercased + deduped; matching in the feed is case-insensitive anyway,
       // and lowercase keeps the list readable in the UI.
@@ -148,7 +192,17 @@ router.patch('/me/profile', writeLimiter, requireAuth, async (req, res, next) =>
       )].slice(0, 30);
     }
     const user = await User.findOneAndUpdate({ id: req.user.id }, { $set: update }, { new: true }).lean();
-    res.json({ profile: { id: user.id, bio: user.bio, skills: user.skills, mutedKeywords: user.mutedKeywords || [] } });
+    res.json({ profile: {
+      id: user.id,
+      headline: user.headline || '',
+      bio: user.bio || '',
+      skills: user.skills || [],
+      links: user.links || {},
+      experience: user.experience || [],
+      education: user.education || [],
+      openTo: user.openTo || [],
+      mutedKeywords: user.mutedKeywords || [],
+    } });
   } catch (err) { next(err); }
 });
 

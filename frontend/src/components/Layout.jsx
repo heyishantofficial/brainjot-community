@@ -24,7 +24,9 @@ export default function Layout({ children, badges = { notifications: 0, messages
       <header className="topbar">
         <div className="topbar__inner">
           <div className="topbar__left">
-            <a href={MAIN_APP_URL} className="backlink" title="Back to brainjot"><ArrowLeft size={18} /></a>
+            <a href={MAIN_APP_URL} className="backlink" title="Back to your tasks and projects">
+              <ArrowLeft size={16} /> <span className="hide-sm">Back to Projects</span>
+            </a>
             <Link to="/" className="brand">brainjot<span className="brand__accent">/community</span></Link>
           </div>
 

@@ -1,5 +1,9 @@
 const express = require('express');
 const User = require('../models/User');
+const Post = require('../models/Post');
+const Comment = require('../models/Comment');
+const Endorsement = require('../models/Endorsement');
+const Conversation = require('../models/Conversation');
 const { verifySsoToken } = require('../utils/sso');
 const { requireAuth } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
@@ -28,6 +32,12 @@ router.post('/sso-login', authLimiter, async (req, res) => {
   }
 
   try {
+    // Snapshot the previous identity so we know whether the denormalized
+    // author copies (posts, comments, endorsements, DM participant blocks)
+    // need a backfill after the upsert.
+    const before = await User.findOne({ id: claims.id })
+      .select('name username avatarUrl -_id').lean();
+
     // Upsert the mirrored user. We refresh identity fields from the token but
     // never clobber community-local fields (bio, skills, karma) — $setOnInsert
     // seeds them only on first login.
@@ -48,6 +58,15 @@ router.post('/sso-login', authLimiter, async (req, res) => {
     );
 
     if (user.banned) return res.status(403).json({ error: 'Account suspended' });
+
+    // Identity changed on the main app (new avatar / display name / username) →
+    // backfill the denormalized author snapshots so old content shows the new
+    // identity. Runs only on an actual change, and in the background — a slow
+    // backfill must never delay or fail the login itself.
+    if (before && (before.avatarUrl !== user.avatarUrl || before.name !== user.name || before.username !== user.username)) {
+      backfillAuthorSnapshots(user).catch((err) =>
+        logger.error({ err, userId: user.id }, '[sso] author snapshot backfill failed'));
+    }
 
     // Fresh session id on privilege change — prevents session fixation.
     await new Promise((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
@@ -73,6 +92,26 @@ router.post('/logout', (req, res) => {
     res.json({ ok: true });
   });
 });
+
+// Propagate a changed identity into every denormalized author copy. Notifications
+// are deliberately skipped — they expire in 90 days and show a tiny avatar once.
+async function backfillAuthorSnapshots(user) {
+  const author = { authorName: user.name, authorUsername: user.username || '', authorAvatarUrl: user.avatarUrl || '' };
+  await Promise.all([
+    Post.updateMany({ authorId: user.id }, { $set: author }),
+    Comment.updateMany({ authorId: user.id }, { $set: author }),
+    Endorsement.updateMany(
+      { fromUserId: user.id },
+      { $set: { 'from.name': user.name, 'from.username': user.username || '', 'from.avatarUrl': user.avatarUrl || '' } },
+    ),
+    Conversation.updateMany(
+      { participantIds: user.id },
+      { $set: { 'participants.$[p].name': user.name, 'participants.$[p].username': user.username || '', 'participants.$[p].avatarUrl': user.avatarUrl || '' } },
+      { arrayFilters: [{ 'p.userId': user.id }] },
+    ),
+  ]);
+  logger.info({ userId: user.id }, '[sso] author snapshots backfilled');
+}
 
 function publicUser(u) {
   return {
