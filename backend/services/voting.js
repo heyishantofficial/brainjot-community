@@ -59,13 +59,13 @@ async function applyVote({ userId, targetType, targetId, value }) {
   const updated = await Model.findByIdAndUpdate(
     targetId,
     { $inc: { upvotes: upDelta, downvotes: downDelta } },
-    { new: true, select: 'upvotes downvotes createdAt' },
+    { new: true, select: 'upvotes downvotes commentCount reportCount createdAt' },
   );
 
   const score = updated.upvotes - updated.downvotes;
   const set = { score };
   if (targetType === 'post') {
-    set.hotScore = hotScore(updated.upvotes, updated.downvotes, updated.createdAt);
+    set.hotScore = hotScore(updated);
   } else {
     set.confidence = confidence(updated.upvotes, updated.downvotes);
   }

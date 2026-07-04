@@ -5,7 +5,7 @@ const { writeLimiter, readLimiter, voteLimiter } = require('../middleware/rateLi
 const { clampLimit, decodeIdCursor, buildPage } = require('../utils/cursor');
 const { sanitizeHtml, sanitizeText, plainTextLength } = require('../utils/sanitize');
 const { objectIdParams } = require('../middleware/objectId');
-const { hotScore } = require('../utils/score');
+const { hotScore, diversifyByAuthor } = require('../utils/score');
 const { applyVote, votesForTargets } = require('../services/voting');
 const { savesForTargets } = require('../services/saves');
 const SavedPost = require('../models/SavedPost');
@@ -24,6 +24,11 @@ const BODY_HTML_MAX = 5000;
 function bodyTooLong(body) {
   if (typeof body !== 'string') return false;
   return body.length > BODY_HTML_MAX || plainTextLength(body) > BODY_TEXT_MAX;
+}
+
+// Escape user text for safe embedding in a RegExp (muted keywords).
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // ── GET /api/posts/topics ────────────────────────────────────────────────────
@@ -90,6 +95,14 @@ router.get('/', readLimiter, optionalAuth, async (req, res, next) => {
       if (!followed.length) return res.json({ items: [], nextCursor: null, hasMore: false });
       filter.topics = { $in: followed };
     }
+    // Muted keywords (X's muted_keyword_filter): posts whose title or body
+    // contain a phrase the viewer muted never reach their feed. One combined,
+    // escaped, case-insensitive alternation — checked during the index walk.
+    const muted = (req.user?.mutedKeywords || []).filter(Boolean);
+    if (muted.length) {
+      const rx = new RegExp(muted.map(escapeRegex).join('|'), 'i');
+      filter.$nor = [{ title: rx }, { body: rx }];
+    }
     if (req.query.topic) filter.topics = normalizeTopic(req.query.topic);
     if (req.query.type && ['discussion', 'showcase', 'question', 'collab'].includes(req.query.type)) {
       filter.type = req.query.type;
@@ -132,6 +145,11 @@ router.get('/', readLimiter, optionalAuth, async (req, res, next) => {
     const docs = await query.limit(limit + 1).lean();
     const page = buildPage(docs, limit, (d) => d._id);
 
+    // Author diversity: reorder WITHIN the page so one author's posting spree
+    // doesn't fill the screen. Runs after buildPage — the cursor still encodes
+    // the raw index order, so pagination never skips or repeats a post.
+    if (sort === 'hot') page.items = diversifyByAuthor(page.items);
+
     // Attach the viewer's vote + saved state in TWO queries, not 2N.
     const ids = page.items.map((p) => p._id);
     const [myVotes, mySaves] = await Promise.all([
@@ -167,8 +185,8 @@ router.post('/', writeLimiter, requireAuth, async (req, res, next) => {
       media: sanitizeMedia(media),
       topics: normalizeTopics(topics),
       createdAt: now,
-      // Seed hotScore so brand-new posts sort sensibly before any votes.
-      hotScore: hotScore(0, 0, now),
+      // Seed hotScore so brand-new posts sort sensibly before any engagement.
+      hotScore: hotScore({ createdAt: now }),
     };
 
     if (type === 'collab') doc.collab = shapeCollabInput(collab);

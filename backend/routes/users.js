@@ -136,12 +136,19 @@ router.get('/:handle', readLimiter, optionalAuth, async (req, res, next) => {
 // ── PATCH /api/users/me — edit community-local profile fields ────────────────
 router.patch('/me/profile', writeLimiter, requireAuth, async (req, res, next) => {
   try {
-    const { bio, skills } = req.body || {};
+    const { bio, skills, mutedKeywords } = req.body || {};
     const update = {};
     if (bio !== undefined) update.bio = sanitizeText(bio, 280);
     if (Array.isArray(skills)) update.skills = skills.map((s) => sanitizeText(s, 40)).filter(Boolean).slice(0, 15);
+    if (Array.isArray(mutedKeywords)) {
+      // Lowercased + deduped; matching in the feed is case-insensitive anyway,
+      // and lowercase keeps the list readable in the UI.
+      update.mutedKeywords = [...new Set(
+        mutedKeywords.map((k) => sanitizeText(k, 40).toLowerCase()).filter(Boolean),
+      )].slice(0, 30);
+    }
     const user = await User.findOneAndUpdate({ id: req.user.id }, { $set: update }, { new: true }).lean();
-    res.json({ profile: { id: user.id, bio: user.bio, skills: user.skills } });
+    res.json({ profile: { id: user.id, bio: user.bio, skills: user.skills, mutedKeywords: user.mutedKeywords || [] } });
   } catch (err) { next(err); }
 });
 

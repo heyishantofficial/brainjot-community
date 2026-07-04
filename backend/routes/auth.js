@@ -86,6 +86,7 @@ function publicUser(u) {
     karma: u.karma || 0,
     followedTopics: u.followedTopics || [],
     blocked: u.blocked || [],
+    mutedKeywords: u.mutedKeywords || [],
   };
 }
 

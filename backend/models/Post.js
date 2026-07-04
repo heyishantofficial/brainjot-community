@@ -46,13 +46,15 @@ const postSchema = new mongoose.Schema({
 
   collab: { type: collabSchema, default: undefined },
 
-  // ── Denormalized counters (source of truth = Vote/Comment collections) ──
-  // These are updated atomically with $inc when a vote/comment happens, so reads
-  // never COUNT(). hotScore is recomputed on each vote and is the feed's sort key.
+  // ── Denormalized counters (source of truth = Vote/Comment/Report collections) ──
+  // These are updated atomically with $inc when a vote/comment/report happens, so
+  // reads never COUNT(). hotScore is recomputed on each such event and is the
+  // feed's sort key — it blends votes, comments and reports (see utils/score.js).
   upvotes: { type: Number, default: 0 },
   downvotes: { type: Number, default: 0 },
   score: { type: Number, default: 0 },              // upvotes - downvotes
   commentCount: { type: Number, default: 0 },
+  reportCount: { type: Number, default: 0 },        // non-dismissed reports; penalizes hotScore
   hotScore: { type: Number, default: 0 },
 
   status: { type: String, enum: ['active', 'removed'], default: 'active', index: true },

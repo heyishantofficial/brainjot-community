@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
-import { Send, Award, Ban } from 'lucide-react';
+import { Send, Award, Ban, VolumeX, X } from 'lucide-react';
 import Avatar from '../components/Avatar';
 import PostCard from '../components/PostCard';
 import { api } from '../api';
@@ -20,13 +20,14 @@ const POST_FILTERS = [
 export default function Profile() {
   const { username } = useParams();
   const navigate = useNavigate();
-  const { user, login } = useAuth();
+  const { user, setUser, login } = useAuth();
   const [profile, setProfile] = useState(null);
   const [endorsements, setEndorsements] = useState([]);
   const [posts, setPosts] = useState([]);
   const [filter, setFilter] = useState('');
   const [blocked, setBlocked] = useState(false);
   const [error, setError] = useState('');
+  const [newMuted, setNewMuted] = useState('');
 
   useEffect(() => {
     api.get(`/users/${username}`)
@@ -54,6 +55,25 @@ export default function Profile() {
     if (!blocked && !confirm(`Block ${profile.name}? They won't be able to message you.`)) return;
     const { data } = await api.post(`/users/${profile.id}/block`);
     setBlocked(data.blocked);
+  }
+
+  // Persist the full muted list, then sync the auth user so the feed filter
+  // applies on the very next fetch (the backend reads it from the session user).
+  async function saveMuted(next) {
+    const { data } = await api.patch('/users/me/profile', { mutedKeywords: next });
+    setUser({ ...user, mutedKeywords: data.profile.mutedKeywords });
+  }
+
+  function addMuted(e) {
+    e.preventDefault();
+    const word = newMuted.trim().toLowerCase();
+    setNewMuted('');
+    if (!word || (user.mutedKeywords || []).includes(word)) return;
+    saveMuted([...(user.mutedKeywords || []), word]).catch(() => alert('Could not save.'));
+  }
+
+  function removeMuted(word) {
+    saveMuted((user.mutedKeywords || []).filter((w) => w !== word)).catch(() => alert('Could not save.'));
   }
 
   if (error) return <div className="center-msg">{error}</div>;
@@ -88,6 +108,33 @@ export default function Profile() {
           </div>
         )}
       </div>
+
+      {isMe && (
+        <section className="profile__muted-words">
+          <h3 className="profile__section"><VolumeX size={16} /> Muted words</h3>
+          <p className="muted">Posts containing these words won't appear in your feed.</p>
+          {(user.mutedKeywords || []).length > 0 && (
+            <div className="collab-skills">
+              {user.mutedKeywords.map((w) => (
+                <span key={w} className="skill-tag">
+                  {w}
+                  <button type="button" className="skill-tag__x" onClick={() => removeMuted(w)} title="Unmute"><X size={11} /></button>
+                </span>
+              ))}
+            </div>
+          )}
+          <form className="field-row" onSubmit={addMuted}>
+            <input
+              className="input input--sm"
+              placeholder="Mute a word or phrase…"
+              value={newMuted}
+              maxLength={40}
+              onChange={(e) => setNewMuted(e.target.value)}
+            />
+            <button className="btn btn--ghost btn--sm" type="submit" disabled={!newMuted.trim()}>Mute</button>
+          </form>
+        </section>
+      )}
 
       {endorsements.length > 0 && (
         <section className="profile__endorsements">

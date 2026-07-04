@@ -7,6 +7,7 @@ const { clampLimit, decodeIdCursor, buildPage } = require('../utils/cursor');
 const { sanitizeHtml, sanitizeText, plainTextLength } = require('../utils/sanitize');
 const { objectIdParams, isObjectId } = require('../middleware/objectId');
 const { applyVote, votesForTargets } = require('../services/voting');
+const { recomputePostHotScore } = require('../services/ranking');
 const { notify, resolveMentions } = require('../services/notify');
 
 const router = express.Router();
@@ -97,8 +98,10 @@ router.post('/', writeLimiter, requireAuth, async (req, res, next) => {
       body: clean,
     });
 
-    // Denormalized counters via $inc — never recounted at read time.
+    // Denormalized counters via $inc — never recounted at read time. Comments
+    // feed the hot ranking (a busy thread outranks a silent one), so refresh it.
     await Post.updateOne({ _id: postId }, { $inc: { commentCount: 1 } });
+    await recomputePostHotScore(postId);
     if (parentId) await Comment.updateOne({ _id: parentId }, { $inc: { replyCount: 1 } });
 
     // ── Notifications: mention > reply > comment, one per person, never self ──
@@ -138,6 +141,7 @@ router.delete('/:id', writeLimiter, objectIdParams('id'), requireAuth, async (re
     comment.body = '';
     await comment.save();
     await Post.updateOne({ _id: comment.postId }, { $inc: { commentCount: -1 } });
+    await recomputePostHotScore(comment.postId);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

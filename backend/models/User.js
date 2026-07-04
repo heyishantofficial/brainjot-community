@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema({
   skills: { type: [String], default: [] },
   followedTopics: { type: [String], default: [] }, // powers the "For you" feed
   blocked: { type: [String], default: [] },        // user ids I've blocked (DM shield)
+  mutedKeywords: { type: [String], default: [] },  // feed never shows posts containing these
 
   // Denormalized reputation — updated via $inc as the user's posts/comments are
   // voted on. Never computed by scanning their content at read time.
