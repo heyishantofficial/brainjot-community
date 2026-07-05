@@ -9,6 +9,7 @@ const { hotScore, diversifyByAuthor } = require('../utils/score');
 const { applyVote, votesForTargets } = require('../services/voting');
 const { savesForTargets } = require('../services/saves');
 const { interestsForTargets } = require('../services/interests');
+const { notify } = require('../services/notify');
 const SavedPost = require('../models/SavedPost');
 const Interest = require('../models/Interest');
 const Conversation = require('../models/Conversation');
@@ -348,6 +349,17 @@ router.post('/:id/interest', writeLimiter, objectIdParams('id'), requireAuth, as
     convo.lastMessage = { text: body.slice(0, 140), senderId: req.user.id, createdAt: message.createdAt };
     convo.updatedAt = message.createdAt;
     await convo.save();
+
+    // Notify the poster that a collab request came in (awaited — serverless can
+    // freeze right after the response, dropping a fire-and-forget insert).
+    await notify({
+      userId: author.id,
+      type: 'collab_request',
+      actor: req.user,
+      postId: post._id,
+      conversationId: convo._id,
+      snippet: post.title,
+    });
 
     res.status(201).json({ ok: true, already: false, messaged: true, conversationId: String(convo._id) });
   } catch (err) { next(err); }

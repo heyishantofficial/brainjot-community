@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const Post = require('../models/Post');
+const { notify } = require('../services/notify');
 const { requireAuth } = require('../middleware/auth');
 const { writeLimiter, readLimiter } = require('../middleware/rateLimit');
 const { clampLimit, decodeIdCursor, buildPage } = require('../utils/cursor');
@@ -140,6 +142,11 @@ router.post('/:id/request', writeLimiter, objectIdParams('id'), requireAuth, asy
 
     convo.status = action === 'accept' ? 'active' : 'declined';
     await convo.save();
+
+    // Tell the requester their pitch was accepted (declines are never revealed).
+    if (action === 'accept') {
+      await notify({ userId: convo.requesterId, type: 'collab_accepted', actor: req.user, postId: convo.originPostId, conversationId: convo._id });
+    }
     res.json({ conversation: shapeConversation(convo.toObject(), req.user.id) });
   } catch (err) { next(err); }
 });
@@ -152,6 +159,12 @@ router.get('/:id/messages', readLimiter, objectIdParams('id'), requireAuth, asyn
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
+    // The other participant's read cursor — drives the sent/read ticks on my own
+    // messages. Returned on EVERY messages response (even an empty poll) so the
+    // sender's ticks flip to "read" on the next poll after the peer opens the chat.
+    const peer = convo.participants.find((p) => p.userId !== req.user.id);
+    const peerLastReadAt = peer?.lastReadAt || null;
+
     // ── Polling mode: ?after=<messageId> ─────────────────────────────────
     // Returns only messages newer than the client's last one, oldest→newest.
     // Each poll is a cheap indexed `_id > after` seek that usually returns zero
@@ -160,7 +173,7 @@ router.get('/:id/messages', readLimiter, objectIdParams('id'), requireAuth, asyn
       const after = new mongoose.Types.ObjectId(req.query.after);
       const fresh = await Message.find({ conversationId: convo._id, _id: { $gt: after } })
         .sort({ _id: 1 }).limit(100).lean();
-      return res.json({ items: fresh.map(shapeMessage), nextCursor: null, hasMore: false });
+      return res.json({ items: fresh.map(shapeMessage), nextCursor: null, hasMore: false, peerLastReadAt });
     }
 
     // ── History mode: cursor pagination (load older pages) ──────────────
@@ -174,6 +187,7 @@ router.get('/:id/messages', readLimiter, objectIdParams('id'), requireAuth, asyn
       items: page.items.map(shapeMessage).reverse(), // oldest→newest for display
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
+      peerLastReadAt,
     });
   } catch (err) { next(err); }
 });
@@ -201,15 +215,20 @@ router.post('/:id/messages', writeLimiter, objectIdParams('id'), requireAuth, as
     // Collab-request gate. While a request is pending (or was declined — never
     // revealed), the requester gets exactly ONE intro message; anything more
     // waits for the recipient. The recipient replying is an implicit accept,
-    // which also reopens a declined thread.
+    // which also reopens a declined thread. We note who to notify and fire it
+    // AFTER the message is saved (so a notify failure can't lose the message).
+    let notifyRequestTo = null;   // poster to notify: a collab request landed
+    let notifyAcceptedTo = null;  // requester to notify: their request was accepted
     if (convo.kind === 'collab' && convo.status !== 'active') {
       if (convo.requesterId === req.user.id) {
         const alreadyPitched = await Message.exists({ conversationId: convo._id, senderId: req.user.id });
         if (convo.status === 'declined' || alreadyPitched) {
           return res.status(403).json({ error: 'Your collab request is waiting for a response — you can send more messages once they reply or accept.' });
         }
+        notifyRequestTo = otherId; // this is the requester's first pitch message
       } else {
-        convo.status = 'active';
+        convo.status = 'active';    // recipient replying = implicit accept
+        notifyAcceptedTo = convo.requesterId;
       }
     }
 
@@ -224,6 +243,15 @@ router.post('/:id/messages', writeLimiter, objectIdParams('id'), requireAuth, as
     convo.lastMessage = { text: body.slice(0, 140), senderId: req.user.id, createdAt: message.createdAt };
     convo.updatedAt = message.createdAt;
     await convo.save();
+
+    // Collab notifications (awaited — serverless can freeze after the response).
+    if (notifyRequestTo) {
+      const post = convo.originPostId ? await Post.findById(convo.originPostId).select('title').lean() : null;
+      await notify({ userId: notifyRequestTo, type: 'collab_request', actor: req.user, postId: convo.originPostId, conversationId: convo._id, snippet: post?.title || '' });
+    }
+    if (notifyAcceptedTo) {
+      await notify({ userId: notifyAcceptedTo, type: 'collab_accepted', actor: req.user, postId: convo.originPostId, conversationId: convo._id });
+    }
 
     // Recipients pick this up on their next poll (no socket push on serverless).
     res.status(201).json({ message: shapeMessage(message.toObject()) });

@@ -2,9 +2,11 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
-// Fire-and-forget notification creation. Never notifies yourself, never throws
-// into the request path (a failed notification must not fail the comment).
-async function notify({ userId, type, actor, postId, commentId, snippet }) {
+// Notification creation. Never notifies yourself, never throws into the request
+// path (a failed notification must not fail the comment/message). Callers should
+// `await` it — on serverless the process can freeze right after the response, so
+// a truly fire-and-forget insert may never run.
+async function notify({ userId, type, actor, postId, commentId, conversationId, snippet }) {
   if (!userId || !actor || userId === actor.id) return;
   try {
     await Notification.create({
@@ -13,6 +15,7 @@ async function notify({ userId, type, actor, postId, commentId, snippet }) {
       actor: { id: actor.id, name: actor.name, username: actor.username || '', avatarUrl: actor.avatarUrl || '' },
       postId: postId || null,
       commentId: commentId || null,
+      conversationId: conversationId || null,
       snippet: (snippet || '').slice(0, 120),
     });
   } catch (err) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MessageSquare, AtSign, Reply } from 'lucide-react';
+import { MessageSquare, AtSign, Reply, Handshake, Check } from 'lucide-react';
 import Avatar from '../components/Avatar';
 import { api } from '../api';
 import { timeAgo } from '../utils';
@@ -9,7 +9,18 @@ const TYPE_META = {
   comment: { icon: MessageSquare, label: 'commented on your post' },
   reply: { icon: Reply, label: 'replied to your comment' },
   mention: { icon: AtSign, label: 'mentioned you' },
+  collab_request: { icon: Handshake, label: 'sent you a collab request' },
+  collab_accepted: { icon: Check, label: 'accepted your collab request' },
 };
+
+// Where a notification links to. Collab notifications open the DM thread;
+// everything else opens the post.
+function notifTarget(n) {
+  if ((n.type === 'collab_request' || n.type === 'collab_accepted') && n.conversationId) {
+    return `/messages/${n.conversationId}`;
+  }
+  return n.postId ? `/post/${n.postId}` : '#';
+}
 
 export default function Notifications() {
   const [items, setItems] = useState([]);
@@ -36,14 +47,14 @@ export default function Notifications() {
       <h1>Notifications</h1>
       {loading && <p className="muted">Loading…</p>}
       {!loading && items.length === 0 && (
-        <p className="empty muted">Nothing yet. When someone comments on your posts or mentions you, it shows up here.</p>
+        <p className="empty muted">Nothing yet. When someone comments on your posts, mentions you, or sends a collab request, it shows up here.</p>
       )}
       <div className="notif-list">
         {items.map((n) => {
           const meta = TYPE_META[n.type] || TYPE_META.comment;
           const Icon = meta.icon;
           return (
-            <Link key={n.id} to={n.postId ? `/post/${n.postId}` : '#'} className={`notif-row ${n.read ? '' : 'unread'}`}>
+            <Link key={n.id} to={notifTarget(n)} className={`notif-row ${n.read ? '' : 'unread'}`}>
               <Avatar user={n.actor} size={36} />
               <div className="notif-row__main">
                 <span><b>{n.actor?.name || 'Someone'}</b> {meta.label}</span>

@@ -45,6 +45,7 @@ router.get('/', readLimiter, requireAuth, async (req, res, next) => {
         type: n.type,
         actor: n.actor,
         postId: n.postId ? String(n.postId) : null,
+        conversationId: n.conversationId ? String(n.conversationId) : null,
         snippet: n.snippet,
         read: n.read,
         createdAt: n.createdAt,

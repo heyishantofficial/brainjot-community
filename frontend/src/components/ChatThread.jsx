@@ -1,10 +1,16 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Send, UserPlus, Award, ChevronDown, ExternalLink, Check, X, Handshake } from 'lucide-react';
+import { ArrowLeft, Send, UserPlus, Award, ChevronDown, ExternalLink, Check, CheckCheck, X, Handshake } from 'lucide-react';
 import Avatar from './Avatar';
 import { api, inviteToProjectUrl, fetchMyMainProjects, sendProjectInvite } from '../api';
 import { useAuth } from '../auth';
 import { profilePath } from '../utils';
+
+// Short clock time for a message's meta line (e.g. "3:45 PM").
+function formatTime(iso) {
+  try { return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  catch { return ''; }
+}
 
 // Polling-based DMs (no websockets on Vercel serverless). The open conversation
 // polls for messages newer than the last one it has, every ~2.5s (slower when the
@@ -24,6 +30,7 @@ export default function ChatThread({ convo, onConvoUpdate, onMessageSent }) {
   const other = convo.other;
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
+  const [peerLastReadAt, setPeerLastReadAt] = useState(null); // drives sent/read ticks
   const [text, setText] = useState('');
   const [responding, setResponding] = useState(false);
   const [endorsing, setEndorsing] = useState(false);
@@ -119,10 +126,11 @@ export default function ChatThread({ convo, onConvoUpdate, onMessageSent }) {
   // Initial load: history, and mark read (then refresh the header badge).
   useEffect(() => {
     let alive = true;
-    setMessages([]); lastIdRef.current = null;
+    setMessages([]); lastIdRef.current = null; setPeerLastReadAt(null);
     api.get(`/conversations/${id}/messages?limit=50`).then(({ data }) => {
       if (!alive) return;
       setMessages(data.items);
+      setPeerLastReadAt(data.peerLastReadAt || null);
       const last = data.items[data.items.length - 1];
       lastIdRef.current = last ? last.id : null;
     }).catch(() => {});
@@ -139,14 +147,23 @@ export default function ChatThread({ convo, onConvoUpdate, onMessageSent }) {
       if (lastIdRef.current) {
         try {
           const { data } = await api.get(`/conversations/${id}/messages`, { params: { after: lastIdRef.current } });
-          if (!cancelled) mergeMessages(data.items);
+          if (!cancelled) {
+            mergeMessages(data.items);
+            setPeerLastReadAt(data.peerLastReadAt || null);
+            // New messages from the peer arrived while I have the thread open →
+            // advance my read cursor so THEY see their messages turn "read", and
+            // clear my own unread badge.
+            if (data.items?.some((m) => m.senderId !== user?.id)) {
+              api.post(`/conversations/${id}/read`).then(() => window.dispatchEvent(new Event('badges:refresh'))).catch(() => {});
+            }
+          }
         } catch { /* transient — try again next tick */ }
       }
       if (!cancelled) timer = setTimeout(poll, document.hidden ? POLL_HIDDEN_MS : POLL_ACTIVE_MS);
     }
     timer = setTimeout(poll, POLL_ACTIVE_MS);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [id, mergeMessages]);
+  }, [id, mergeMessages, user?.id]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
@@ -239,11 +256,31 @@ export default function ChatThread({ convo, onConvoUpdate, onMessageSent }) {
       )}
 
       <div className="conversation__messages">
-        {messages.map((m) => (
-          <div key={m.id} className={`bubble ${m.senderId === user?.id ? 'bubble--me' : ''}`}>
-            {m.body}
-          </div>
-        ))}
+        {messages.map((m, i) => {
+          const mine = m.senderId === user?.id;
+          const prev = messages[i - 1];
+          const next = messages[i + 1];
+          const startOfRun = !prev || prev.senderId !== m.senderId;
+          const endOfRun = !next || next.senderId !== m.senderId;
+          // "Read" once the peer's read cursor has passed this message's time.
+          const read = mine && peerLastReadAt && new Date(m.createdAt) <= new Date(peerLastReadAt);
+          return (
+            <div
+              key={m.id}
+              className={`bubble-row${mine ? ' bubble-row--me' : ''}${startOfRun ? ' bubble-row--start' : ''}${endOfRun ? ' bubble-row--tail' : ''}`}
+            >
+              <div className={`bubble${mine ? ' bubble--me' : ''}`}>
+                <span className="bubble__text">{m.body}</span>
+                <span className="bubble__meta">
+                  <span className="bubble__time">{formatTime(m.createdAt)}</span>
+                  {mine && (read
+                    ? <CheckCheck size={15} className="bubble__tick bubble__tick--read" aria-label="Read" />
+                    : <Check size={15} className="bubble__tick" aria-label="Sent" />)}
+                </span>
+              </div>
+            </div>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
