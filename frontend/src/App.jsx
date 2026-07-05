@@ -5,8 +5,7 @@ import Feed from './pages/Feed';
 import PostDetail from './pages/PostDetail';
 import CollabBoard from './pages/CollabBoard';
 import Profile from './pages/Profile';
-import Inbox from './pages/Inbox';
-import Conversation from './pages/Conversation';
+import Messenger from './pages/Messenger';
 import Notifications from './pages/Notifications';
 import Search from './pages/Search';
 import Saved from './pages/Saved';
@@ -53,8 +52,8 @@ function Shell() {
         <Route path="/collab" element={<CollabBoard />} />
         <Route path="/post/:id" element={<PostDetail />} />
         <Route path="/u/:username" element={<Profile />} />
-        <Route path="/messages" element={<Inbox />} />
-        <Route path="/messages/:id" element={<Conversation />} />
+        <Route path="/messages" element={<Messenger />} />
+        <Route path="/messages/:id" element={<Messenger />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/search" element={<Search />} />
         <Route path="/saved" element={<Saved />} />

@@ -13,6 +13,9 @@ const router = express.Router();
 
 // ── GET /api/conversations ───────────────────────────────────────────────────
 // The inbox: my conversations, most recently active first, with unread flags.
+// `?tab=dms|collab` splits normal DMs from collab-request threads so pitches
+// never bury real conversations. Docs from before the `kind` field existed are
+// classified by whether they were started from a collab post (originPostId).
 router.get('/', readLimiter, requireAuth, async (req, res, next) => {
   try {
     const limit = clampLimit(req.query.limit);
@@ -21,12 +24,30 @@ router.get('/', readLimiter, requireAuth, async (req, res, next) => {
       const before = new Date(Number(req.query.cursor));
       if (!isNaN(before)) filter.updatedAt = { $lt: before };
     }
-    const docs = await Conversation.find(filter).sort({ updatedAt: -1 }).limit(limit + 1).lean();
+    if (req.query.tab === 'dms') {
+      filter.$or = [{ kind: 'dm' }, { kind: { $exists: false }, originPostId: null }];
+    } else if (req.query.tab === 'collab') {
+      filter.$and = [
+        { $or: [{ kind: 'collab' }, { kind: { $exists: false }, originPostId: { $ne: null } }] },
+        // A declined request disappears for the recipient; the requester still
+        // sees it (shaped as pending — declines are never revealed).
+        { $or: [{ status: { $ne: 'declined' } }, { requesterId: req.user.id }] },
+      ];
+    }
+    const [docs, requestCount] = await Promise.all([
+      Conversation.find(filter).sort({ updatedAt: -1 }).limit(limit + 1)
+        .populate({ path: 'originPostId', select: 'title' }).lean(),
+      // Pending requests waiting on ME — the badge on the Collab Requests tab.
+      Conversation.countDocuments({
+        participantIds: req.user.id, kind: 'collab', status: 'pending', requesterId: { $ne: req.user.id },
+      }),
+    ]);
     const page = buildPage(docs, limit, (d) => d.updatedAt.getTime());
     res.json({
       items: page.items.map((c) => shapeConversation(c, req.user.id)),
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
+      requestCount,
     });
   } catch (err) { next(err); }
 });
@@ -53,6 +74,11 @@ router.post('/', writeLimiter, requireAuth, async (req, res, next) => {
 
     const pairKey = Conversation.pairKeyFor(req.user.id, userId);
     const now = new Date();
+    // A chat opened from a collab post is a collab REQUEST: it routes to the
+    // recipient's Collab Requests tab and stays pending (intro message only)
+    // until they accept. A chat opened from a profile is a plain DM. If the
+    // pair already has a thread, $setOnInsert leaves it untouched.
+    const fromCollabPost = isObjectId(originPostId);
     const convo = await Conversation.findOneAndUpdate(
       { pairKey },
       {
@@ -61,7 +87,10 @@ router.post('/', writeLimiter, requireAuth, async (req, res, next) => {
           participantIds: [req.user.id, userId].sort(),
           participants: [snap(req.user), snap(other)],
           // Validated: a garbage originPostId would CastError at insert (500).
-          originPostId: isObjectId(originPostId) ? originPostId : null,
+          originPostId: fromCollabPost ? originPostId : null,
+          kind: fromCollabPost ? 'collab' : 'dm',
+          status: fromCollabPost ? 'pending' : 'active',
+          requesterId: fromCollabPost ? req.user.id : '',
           createdAt: now,
           updatedAt: now,
         },
@@ -70,6 +99,48 @@ router.post('/', writeLimiter, requireAuth, async (req, res, next) => {
     ).lean();
 
     res.status(201).json({ conversation: shapeConversation(convo, req.user.id) });
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/conversations/:id ───────────────────────────────────────────────
+// One conversation, shaped for the viewer — lets a deep link (/messages/:id)
+// resolve the thread's peer, tab, and request state without loading the inbox.
+router.get('/:id', readLimiter, objectIdParams('id'), requireAuth, async (req, res, next) => {
+  try {
+    const convo = await Conversation.findById(req.params.id)
+      .populate({ path: 'originPostId', select: 'title' }).lean();
+    if (!convo || !convo.participantIds.includes(req.user.id)) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+    res.json({ conversation: shapeConversation(convo, req.user.id) });
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/conversations/:id/request ──────────────────────────────────────
+// Accept or decline a pending collab request. Recipient only. Accepting opens
+// the thread for normal messaging; declining hides it from the recipient
+// (silently — the requester keeps seeing "pending"). A declined request can
+// still be accepted later if the recipient changes their mind.
+router.post('/:id/request', writeLimiter, objectIdParams('id'), requireAuth, async (req, res, next) => {
+  try {
+    const { action } = req.body || {};
+    if (!['accept', 'decline'].includes(action)) return res.status(400).json({ error: 'Invalid action' });
+
+    const convo = await Conversation.findById(req.params.id);
+    if (!convo || !convo.participantIds.includes(req.user.id)) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+    if (convo.requesterId === req.user.id) {
+      return res.status(403).json({ error: 'Only the recipient can respond to a request' });
+    }
+    const canRespond = convo.status === 'pending' || (convo.status === 'declined' && action === 'accept');
+    if (convo.kind !== 'collab' || !canRespond) {
+      return res.status(400).json({ error: 'No pending request on this conversation' });
+    }
+
+    convo.status = action === 'accept' ? 'active' : 'declined';
+    await convo.save();
+    res.json({ conversation: shapeConversation(convo.toObject(), req.user.id) });
   } catch (err) { next(err); }
 });
 
@@ -127,6 +198,21 @@ router.post('/:id/messages', writeLimiter, objectIdParams('id'), requireAuth, as
       return res.status(403).json({ error: 'This user is not accepting messages' });
     }
 
+    // Collab-request gate. While a request is pending (or was declined — never
+    // revealed), the requester gets exactly ONE intro message; anything more
+    // waits for the recipient. The recipient replying is an implicit accept,
+    // which also reopens a declined thread.
+    if (convo.kind === 'collab' && convo.status !== 'active') {
+      if (convo.requesterId === req.user.id) {
+        const alreadyPitched = await Message.exists({ conversationId: convo._id, senderId: req.user.id });
+        if (convo.status === 'declined' || alreadyPitched) {
+          return res.status(403).json({ error: 'Your collab request is waiting for a response — you can send more messages once they reply or accept.' });
+        }
+      } else {
+        convo.status = 'active';
+      }
+    }
+
     const message = await Message.create({
       conversationId: convo._id,
       senderId: req.user.id,
@@ -165,11 +251,23 @@ function shapeConversation(c, meId) {
   const other = c.participants.find((p) => p.userId !== meId) || c.participants[0];
   const unread = !!(c.lastMessage?.createdAt && c.lastMessage.senderId !== meId &&
     (!me?.lastReadAt || new Date(me.lastReadAt) < new Date(c.lastMessage.createdAt)));
+  // originPostId may be populated ({_id, title}) or a raw ObjectId.
+  const op = c.originPostId;
+  const originPostId = op ? String(op._id || op) : null;
+  // Legacy docs (pre-`kind`) classify by origin and were never gated.
+  const kind = c.kind || (originPostId ? 'collab' : 'dm');
+  let status = c.status || 'active';
+  const isRequester = !!c.requesterId && c.requesterId === meId;
+  if (status === 'declined' && isRequester) status = 'pending'; // never reveal a decline
   return {
     id: String(c._id),
     other: other ? { id: other.userId, name: other.name, username: other.username, avatarUrl: other.avatarUrl } : null,
     lastMessage: c.lastMessage || null,
-    originPostId: c.originPostId ? String(c.originPostId) : null,
+    originPostId,
+    originPost: op && op.title ? { id: originPostId, title: op.title } : null,
+    kind,
+    status,
+    isRequester,
     unread,
     updatedAt: c.updatedAt,
   };

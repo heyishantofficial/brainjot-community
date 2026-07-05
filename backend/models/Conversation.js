@@ -30,6 +30,17 @@ const conversationSchema = new mongoose.Schema({
   // Optional context: a conversation started from a specific collab post.
   originPostId: { type: mongoose.Schema.Types.ObjectId, ref: 'Post', default: null },
 
+  // Inbox routing. `kind: 'collab'` threads live under the Collab Requests tab
+  // so pitches never mix with normal DMs. A collab thread starts `pending` and
+  // gates the requester to a single intro message until the recipient accepts
+  // (an explicit Accept, or simply replying). `declined` hides the thread from
+  // the recipient; the requester is never told — they still see "pending".
+  // Docs created before these fields existed hydrate to 'dm'/'active' via the
+  // defaults, so old threads keep behaving like plain DMs.
+  kind: { type: String, enum: ['dm', 'collab'], default: 'dm', index: true },
+  status: { type: String, enum: ['active', 'pending', 'declined'], default: 'active' },
+  requesterId: { type: String, default: '' }, // who initiated a collab request
+
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now, index: true }, // inbox sort key
 }, { minimize: false });

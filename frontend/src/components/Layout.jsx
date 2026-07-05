@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { PenSquare, MessageCircle, ArrowLeft, LogOut, Bell, Bookmark, Search } from 'lucide-react';
 import Avatar from './Avatar';
 import Composer from './Composer';
@@ -12,6 +12,9 @@ export default function Layout({ children, badges = { notifications: 0, messages
   const [composing, setComposing] = useState(false);
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  // The messenger is a full-bleed split view — no centered column, no padding.
+  const isMessenger = pathname.startsWith('/messages');
 
   function submitSearch(e) {
     e.preventDefault();
@@ -63,7 +66,7 @@ export default function Layout({ children, badges = { notifications: 0, messages
         </div>
       </header>
 
-      <main className="content">{children}</main>
+      <main className={`content${isMessenger ? ' content--messenger' : ''}`}>{children}</main>
 
       {composing && <Composer onClose={() => setComposing(false)} onCreated={(p) => navigate(`/post/${p.id}`)} />}
     </div>

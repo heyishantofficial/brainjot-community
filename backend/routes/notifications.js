@@ -17,9 +17,11 @@ router.get('/badges', readLimiter, requireAuth, async (req, res, next) => {
     const [notifications, convos] = await Promise.all([
       Notification.countDocuments({ userId: req.user.id, read: false }),
       Conversation.find({ participantIds: req.user.id }).sort({ updatedAt: -1 }).limit(50)
-        .select('participants lastMessage').lean(),
+        .select('participants lastMessage status').lean(),
     ]);
     const messages = convos.filter((c) => {
+      // A declined collab request is dismissed — it must not badge forever.
+      if (c.status === 'declined') return false;
       if (!c.lastMessage?.createdAt || c.lastMessage.senderId === req.user.id) return false;
       const me = c.participants.find((p) => p.userId === req.user.id);
       return !me?.lastReadAt || new Date(me.lastReadAt) < new Date(c.lastMessage.createdAt);
