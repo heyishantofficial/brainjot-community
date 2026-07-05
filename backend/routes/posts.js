@@ -8,7 +8,12 @@ const { objectIdParams } = require('../middleware/objectId');
 const { hotScore, diversifyByAuthor } = require('../utils/score');
 const { applyVote, votesForTargets } = require('../services/voting');
 const { savesForTargets } = require('../services/saves');
+const { interestsForTargets } = require('../services/interests');
 const SavedPost = require('../models/SavedPost');
+const Interest = require('../models/Interest');
+const Conversation = require('../models/Conversation');
+const Message = require('../models/Message');
+const User = require('../models/User');
 const { TOPICS, normalizeTopic } = require('../config/topics');
 const { uid } = require('../utils/ids');
 const logger = require('../utils/logger');
@@ -47,11 +52,12 @@ router.get('/search', readLimiter, optionalAuth, async (req, res, next) => {
       { score: { $meta: 'textScore' } },
     ).sort({ score: { $meta: 'textScore' } }).limit(30).lean();
     const ids = docs.map((p) => p._id);
-    const [myVotes, mySaves] = await Promise.all([
+    const [myVotes, mySaves, myInterests] = await Promise.all([
       votesForTargets(req.user?.id, 'post', ids),
       savesForTargets(req.user?.id, ids),
+      interestsForTargets(req.user?.id, ids),
     ]);
-    res.json({ items: docs.map((p) => shapePost(p, myVotes.get(String(p._id)) || 0, mySaves.has(String(p._id)))) });
+    res.json({ items: docs.map((p) => shapePost(p, myVotes.get(String(p._id)) || 0, mySaves.has(String(p._id)), myInterests.has(String(p._id)))) });
   } catch (err) { next(err); }
 });
 
@@ -67,9 +73,12 @@ router.get('/saved', readLimiter, requireAuth, async (req, res, next) => {
     const posts = await Post.find({ _id: { $in: page.items.map((s) => s.postId) }, status: 'active' }).lean();
     const byId = new Map(posts.map((p) => [String(p._id), p]));
     const ordered = page.items.map((s) => byId.get(String(s.postId))).filter(Boolean);
-    const myVotes = await votesForTargets(req.user.id, 'post', ordered.map((p) => p._id));
+    const [myVotes, myInterests] = await Promise.all([
+      votesForTargets(req.user.id, 'post', ordered.map((p) => p._id)),
+      interestsForTargets(req.user.id, ordered.map((p) => p._id)),
+    ]);
     res.json({
-      items: ordered.map((p) => shapePost(p, myVotes.get(String(p._id)) || 0, true)),
+      items: ordered.map((p) => shapePost(p, myVotes.get(String(p._id)) || 0, true, myInterests.has(String(p._id)))),
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
     });
@@ -152,11 +161,12 @@ router.get('/', readLimiter, optionalAuth, async (req, res, next) => {
 
     // Attach the viewer's vote + saved state in TWO queries, not 2N.
     const ids = page.items.map((p) => p._id);
-    const [myVotes, mySaves] = await Promise.all([
+    const [myVotes, mySaves, myInterests] = await Promise.all([
       votesForTargets(req.user?.id, 'post', ids),
       savesForTargets(req.user?.id, ids),
+      interestsForTargets(req.user?.id, ids),
     ]);
-    const items = page.items.map((p) => shapePost(p, myVotes.get(String(p._id)) || 0, mySaves.has(String(p._id))));
+    const items = page.items.map((p) => shapePost(p, myVotes.get(String(p._id)) || 0, mySaves.has(String(p._id)), myInterests.has(String(p._id))));
 
     res.json({ items, nextCursor: page.nextCursor, hasMore: page.hasMore });
   } catch (err) { next(err); }
@@ -203,11 +213,12 @@ router.get('/:id', readLimiter, objectIdParams('id'), optionalAuth, async (req, 
   try {
     const post = await Post.findOne({ _id: req.params.id, status: 'active' }).lean();
     if (!post) return res.status(404).json({ error: 'Post not found' });
-    const [myVotes, mySaves] = await Promise.all([
+    const [myVotes, mySaves, myInterests] = await Promise.all([
       votesForTargets(req.user?.id, 'post', [post._id]),
       savesForTargets(req.user?.id, [post._id]),
+      interestsForTargets(req.user?.id, [post._id]),
     ]);
-    res.json({ post: shapePost(post, myVotes.get(String(post._id)) || 0, mySaves.has(String(post._id))) });
+    res.json({ post: shapePost(post, myVotes.get(String(post._id)) || 0, mySaves.has(String(post._id)), myInterests.has(String(post._id))) });
   } catch (err) { next(err); }
 });
 
@@ -258,6 +269,90 @@ router.post('/:id/vote', voteLimiter, objectIdParams('id'), requireAuth, async (
   }
 });
 
+// ── POST /api/posts/:id/interest ─────────────────────────────────────────────
+// "I'm interested" on a collab post: one click finds-or-creates the DM with the
+// poster and drops an intro message in it ("Hi, I'm interested in this
+// project…") — no comment needed. The unique Interest record makes it
+// idempotent: a second click just returns the existing conversation, it never
+// re-sends the intro. Same block rules as starting a conversation manually.
+router.post('/:id/interest', writeLimiter, objectIdParams('id'), requireAuth, async (req, res, next) => {
+  try {
+    const post = await Post.findOne({ _id: req.params.id, status: 'active' }).lean();
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+    if (post.type !== 'collab') return res.status(400).json({ error: 'Only collab posts accept interest' });
+    if (post.authorId === req.user.id) return res.status(400).json({ error: 'This is your own post' });
+    if (post.collab?.status === 'closed') return res.status(400).json({ error: 'This role has been filled' });
+
+    const author = await User.findOne({ id: post.authorId }).lean();
+    if (!author) return res.status(404).json({ error: 'User not found' });
+    if ((author.blocked || []).includes(req.user.id)) {
+      return res.status(403).json({ error: 'This user is not accepting messages' });
+    }
+    if ((req.user.blocked || []).includes(author.id)) {
+      return res.status(403).json({ error: 'You have blocked this user. Unblock them to express interest.' });
+    }
+
+    // Find-or-create the DM thread (same atomic upsert as POST /conversations).
+    const pairKey = Conversation.pairKeyFor(req.user.id, author.id);
+    const now = new Date();
+    const convo = await Conversation.findOneAndUpdate(
+      { pairKey },
+      {
+        $setOnInsert: {
+          pairKey,
+          participantIds: [req.user.id, author.id].sort(),
+          participants: [
+            { userId: req.user.id, name: req.user.name, username: req.user.username || '', avatarUrl: req.user.avatarUrl || '', lastReadAt: null },
+            { userId: author.id, name: author.name, username: author.username || '', avatarUrl: author.avatarUrl || '', lastReadAt: null },
+          ],
+          originPostId: post._id,
+          // "I'm interested" is a collab request: it lands in the poster's
+          // Collab Requests tab, pending until they accept (or reply). The
+          // auto-intro below is the requester's one allowed message.
+          kind: 'collab',
+          status: 'pending',
+          requesterId: req.user.id,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+
+    // Claim the interest FIRST — the unique {userId,postId} index is the atomic
+    // dedupe, so two concurrent clicks can't both send an intro. Duplicate key =
+    // already expressed → hand back the conversation without re-sending.
+    try {
+      await Interest.create({ userId: req.user.id, postId: post._id });
+    } catch (err) {
+      if (err?.code === 11000) return res.json({ ok: true, already: true, conversationId: String(convo._id) });
+      throw err;
+    }
+
+    // Respect the same one-message gate as manual collab requests: the auto-intro
+    // is the requester's ONE allowed message while the thread is pending. If they
+    // already sent a message in this thread (e.g. via the Message button first),
+    // don't slip a second one in behind the gate — just record the interest.
+    const alreadyMessaged = await Message.exists({ conversationId: convo._id, senderId: req.user.id });
+    if (alreadyMessaged) {
+      return res.status(201).json({ ok: true, already: false, messaged: false, conversationId: String(convo._id) });
+    }
+
+    const body = `👋 Hi! I'm interested in this project: "${post.title}". I saw your collab post and would love to work together.`;
+    const message = await Message.create({
+      conversationId: convo._id,
+      senderId: req.user.id,
+      body,
+      readBy: [req.user.id],
+    });
+    convo.lastMessage = { text: body.slice(0, 140), senderId: req.user.id, createdAt: message.createdAt };
+    convo.updatedAt = message.createdAt;
+    await convo.save();
+
+    res.status(201).json({ ok: true, already: false, messaged: true, conversationId: String(convo._id) });
+  } catch (err) { next(err); }
+});
+
 // ── POST /api/posts/:id/save — toggle bookmark ───────────────────────────────
 router.post('/:id/save', writeLimiter, objectIdParams('id'), requireAuth, async (req, res, next) => {
   try {
@@ -275,7 +370,7 @@ router.post('/:id/save', writeLimiter, objectIdParams('id'), requireAuth, async 
 });
 
 // ── shaping helpers ──────────────────────────────────────────────────────────
-function shapePost(p, myVote, mySaved = false) {
+function shapePost(p, myVote, mySaved = false, myInterested = false) {
   return {
     id: String(p._id),
     type: p.type,
@@ -289,6 +384,7 @@ function shapePost(p, myVote, mySaved = false) {
     commentCount: p.commentCount || 0,
     myVote: myVote || 0,
     mySaved: !!mySaved,
+    myInterested: !!myInterested,
     pinned: !!p.pinned,
     createdAt: p.createdAt,
     editedAt: p.editedAt || null,

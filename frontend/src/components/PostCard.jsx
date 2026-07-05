@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MessageSquare, Send, Bookmark, FileText } from 'lucide-react';
+import { MessageSquare, Send, Bookmark, FileText, Hand } from 'lucide-react';
 import Avatar from './Avatar';
 import VoteButtons from './VoteButtons';
 import CollabMeta from './CollabMeta';
@@ -12,6 +12,8 @@ export default function PostCard({ post, compact = true }) {
   const { user, login } = useAuth();
   const navigate = useNavigate();
   const [saved, setSaved] = useState(!!post.mySaved);
+  const [interested, setInterested] = useState(!!post.myInterested);
+  const [sendingInterest, setSendingInterest] = useState(false);
   const tm = typeMeta(post.type);
   const isCollab = post.type === 'collab';
   const images = post.media?.filter((m) => m.type !== 'file') || [];
@@ -26,6 +28,26 @@ export default function PostCard({ post, compact = true }) {
       setSaved(data.saved);
     } catch {
       setSaved((v) => !v); // rollback
+    }
+  }
+
+  // "I'm interested" on a collab post → one click auto-sends an intro DM to the
+  // poster ("Hi, I'm interested in this project…") and opens the thread. The
+  // backend dedupes, so a repeat click just reopens the existing conversation.
+  async function expressInterest(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!user) return login();
+    if (post.author.id === user.id || sendingInterest) return;
+    setSendingInterest(true);
+    try {
+      const { data } = await api.post(`/posts/${post.id}/interest`);
+      setInterested(true);
+      navigate(`/messages/${data.conversationId}`);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Could not send your interest. Try again.');
+    } finally {
+      setSendingInterest(false);
     }
   }
 
@@ -90,7 +112,19 @@ export default function PostCard({ post, compact = true }) {
             <Bookmark size={15} fill={saved ? 'currentColor' : 'none'} /> {saved ? 'Saved' : 'Save'}
           </button>
           {isCollab && post.author.id !== user?.id && (
-            <button className="action-btn action-btn--primary" onClick={messagePoster}><Send size={15} /> Message</button>
+            <>
+              {post.collab?.status !== 'closed' && (
+                <button
+                  className={`action-btn action-btn--interest ${interested ? 'action-btn--active' : ''}`}
+                  onClick={expressInterest}
+                  disabled={sendingInterest}
+                  title={interested ? 'Open the conversation' : 'Send the poster a DM saying you’re interested'}
+                >
+                  <Hand size={15} /> {interested ? 'Interested ✓' : (sendingInterest ? 'Sending…' : "I'm interested")}
+                </button>
+              )}
+              <button className="action-btn action-btn--primary" onClick={messagePoster}><Send size={15} /> Message</button>
+            </>
           )}
         </div>
       </div>
