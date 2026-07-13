@@ -6,7 +6,7 @@ const logger = require('../utils/logger');
 // returns null and the frontend never subscribes.
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@brainjot.space';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:verify@brainjot.space';
 
 const pushEnabled = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 if (pushEnabled) {
