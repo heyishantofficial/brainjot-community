@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MessageSquare, AtSign, Reply, Handshake, Check } from 'lucide-react';
+import { MessageSquare, AtSign, Reply, Handshake, Check, Bell } from 'lucide-react';
 import Avatar from '../components/Avatar';
 import { api } from '../api';
+import { enablePush, pushSupported } from '../push';
 import { timeAgo } from '../utils';
 
 const TYPE_META = {
@@ -27,6 +28,16 @@ export default function Notifications() {
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Offer the push opt-in only where it can actually work: supported browser,
+  // permission not yet decided (once denied, only browser settings can undo it).
+  const [showPushBanner, setShowPushBanner] = useState(
+    () => pushSupported() && Notification.permission === 'default'
+  );
+
+  async function onEnablePush() {
+    const ok = await enablePush();
+    if (ok || Notification.permission !== 'default') setShowPushBanner(false);
+  }
 
   useEffect(() => {
     api.get('/notifications').then(({ data }) => {
@@ -45,6 +56,13 @@ export default function Notifications() {
   return (
     <div className="notifications">
       <h1>Notifications</h1>
+      {showPushBanner && (
+        <div className="notif-push-banner">
+          <Bell size={16} />
+          <span>Get notified even when this tab is closed.</span>
+          <button className="btn" onClick={onEnablePush}>Enable notifications</button>
+        </div>
+      )}
       {loading && <p className="muted">Loading…</p>}
       {!loading && items.length === 0 && (
         <p className="empty muted">Nothing yet. When someone comments on your posts, mentions you, or sends a collab request, it shows up here.</p>

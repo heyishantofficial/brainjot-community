@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const { pushPayloadFor, sendPushToUser } = require('./push');
 const logger = require('../utils/logger');
 
 // Notification creation. Never notifies yourself, never throws into the request
@@ -9,7 +10,7 @@ const logger = require('../utils/logger');
 async function notify({ userId, type, actor, postId, commentId, conversationId, snippet }) {
   if (!userId || !actor || userId === actor.id) return;
   try {
-    await Notification.create({
+    const doc = {
       userId,
       type,
       actor: { id: actor.id, name: actor.name, username: actor.username || '', avatarUrl: actor.avatarUrl || '' },
@@ -17,7 +18,10 @@ async function notify({ userId, type, actor, postId, commentId, conversationId, 
       commentId: commentId || null,
       conversationId: conversationId || null,
       snippet: (snippet || '').slice(0, 120),
-    });
+    };
+    await Notification.create(doc);
+    // Web push to closed tabs — same awaited-not-forgotten rule as the insert.
+    await sendPushToUser(userId, pushPayloadFor(doc));
   } catch (err) {
     logger.warn({ err }, '[notify] failed (non-fatal)');
   }

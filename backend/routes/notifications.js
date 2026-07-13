@@ -1,11 +1,52 @@
 const express = require('express');
 const Notification = require('../models/Notification');
 const Conversation = require('../models/Conversation');
+const PushSubscription = require('../models/PushSubscription');
+const { pushEnabled, VAPID_PUBLIC_KEY } = require('../services/push');
 const { requireAuth } = require('../middleware/auth');
 const { readLimiter, writeLimiter } = require('../middleware/rateLimit');
 const { clampLimit, decodeIdCursor, buildPage } = require('../utils/cursor');
 
 const router = express.Router();
+
+// ── GET /api/notifications/push/key ──────────────────────────────────────────
+// VAPID public key for pushManager.subscribe(); null → push disabled on server.
+router.get('/push/key', readLimiter, requireAuth, (_req, res) => {
+  res.json({ key: pushEnabled ? VAPID_PUBLIC_KEY : null });
+});
+
+// ── POST /api/notifications/push/subscribe ───────────────────────────────────
+// Store/refresh this browser's push subscription. Upsert on endpoint: a
+// re-subscribe (or a different user on the same browser) takes it over.
+router.post('/push/subscribe', writeLimiter, requireAuth, async (req, res, next) => {
+  try {
+    const sub = req.body?.subscription;
+    if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+      return res.status(400).json({ error: 'Invalid subscription' });
+    }
+    if (typeof sub.endpoint !== 'string' || sub.endpoint.length > 1024 || !/^https:\/\//.test(sub.endpoint)) {
+      return res.status(400).json({ error: 'Invalid endpoint' });
+    }
+    const count = await PushSubscription.countDocuments({ userId: req.user.id });
+    const exists = await PushSubscription.findOne({ endpoint: sub.endpoint }).select('_id').lean();
+    if (!exists && count >= 10) return res.status(429).json({ error: 'Too many devices subscribed' });
+    await PushSubscription.updateOne(
+      { endpoint: sub.endpoint },
+      { $set: { userId: req.user.id, keys: { p256dh: String(sub.keys.p256dh).slice(0, 256), auth: String(sub.keys.auth).slice(0, 256) }, userAgent: String(req.headers['user-agent'] || '').slice(0, 200) } },
+      { upsert: true }
+    );
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/notifications/push/unsubscribe ─────────────────────────────────
+router.post('/push/unsubscribe', writeLimiter, requireAuth, async (req, res, next) => {
+  try {
+    const { endpoint } = req.body || {};
+    if (endpoint) await PushSubscription.deleteOne({ endpoint: String(endpoint), userId: req.user.id });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
 
 // ── GET /api/notifications/badges ────────────────────────────────────────────
 // ONE combined endpoint for every unread indicator: the community header polls

@@ -11,10 +11,18 @@ import Search from './pages/Search';
 import Saved from './pages/Saved';
 import { AuthProvider, useAuth } from './auth';
 import { api } from './api';
+import { syncPushIfGranted } from './push';
 
 function Shell() {
   const { user, loading } = useAuth();
   const [badges, setBadges] = useState({ notifications: 0, messages: 0 });
+
+  // Re-attach this browser's web-push subscription on login. Silent — only
+  // runs when notification permission was already granted (the prompt lives
+  // behind the enable button on the Notifications page).
+  useEffect(() => {
+    if (user) syncPushIfGranted();
+  }, [user]);
 
   // One combined badge poll (unread DMs + unread notifications) every 30s while
   // visible, slower when hidden, refreshed on tab focus and whenever a page
