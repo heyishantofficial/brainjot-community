@@ -37,6 +37,8 @@ export default function Composer({ onClose, onCreated }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [uploadsEnabled, setUploadsEnabled] = useState(false);
+  const [storageLimit, setStorageLimit] = useState(false);
+  const [proSoon, setProSoon] = useState(false);
   // [{ url, uploading, kind: 'image'|'file', name }]
   const [attachments, setAttachments] = useState([]);
   const fileRef = useRef(null);
@@ -61,9 +63,10 @@ export default function Composer({ onClose, onCreated }) {
         // Raw axios (no cookies) — the presigned URL is the credential.
         await axios.put(data.uploadUrl, file, { headers: { 'Content-Type': file.type } });
         setAttachments((prev) => prev.map((a) => (a === placeholder ? { ...a, url: data.publicUrl, uploading: false } : a)));
-      } catch {
+      } catch (err) {
         setAttachments((prev) => prev.filter((a) => a !== placeholder));
-        setError('Upload failed. Try again.');
+        if (err.response?.data?.code === 'storage_limit') setStorageLimit(true);
+        else setError('Upload failed. Try again.');
       }
     }
   }
@@ -191,6 +194,17 @@ export default function Composer({ onClose, onCreated }) {
                 <input className="input" placeholder="Location"
                   value={collab.location} onChange={(e) => setCollab({ ...collab, location: e.target.value })} />
               )}
+            </div>
+          )}
+
+          {storageLimit && (
+            <div className="storage-limit-notice">
+              <strong>You've reached your free upload limit.</strong>
+              <p>This app is built by a small independent team. To keep free accounts available for everyone, storage is currently limited to 200 MB per user.</p>
+              <p>If you enjoy using the app, upgrading to Pro gives you more storage and exclusive features—and directly supports future development.</p>
+              <button type="button" className="btn btn--primary" onClick={() => setProSoon(true)}>
+                {proSoon ? 'Coming soon ✨' : 'Upgrade to Pro'}
+              </button>
             </div>
           )}
 

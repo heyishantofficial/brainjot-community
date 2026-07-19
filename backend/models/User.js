@@ -56,6 +56,11 @@ const userSchema = new mongoose.Schema({
   // Moderation.
   banned: { type: Boolean, default: false },
 
+  // Free-tier storage accounting: bytes reserved via /uploads/sign. Incremented
+  // when a presigned URL is issued (counts intent, not confirmed uploads —
+  // there is no confirm step, and over-counting is the abuse-safe direction).
+  storageUsedBytes: { type: Number, default: 0 },
+
   lastSeenAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
 }, { minimize: false });

@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { requireAuth } = require('../middleware/auth');
+const User = require('../models/User');
 const { writeLimiter } = require('../middleware/rateLimit');
 const logger = require('../utils/logger');
 
@@ -20,6 +21,8 @@ const router = express.Router();
 // app's own uploads (avatars, project files).
 
 const REQUIRED_ENV = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME', 'R2_PUBLIC_URL'];
+
+const MAX_STORAGE_BYTES = 200 * 1024 * 1024; // 200 MB per user (free tier)
 
 function uploadsEnabled() {
   return REQUIRED_ENV.every((k) => !!process.env[k]);
@@ -61,6 +64,12 @@ router.post('/sign', writeLimiter, requireAuth, async (req, res, next) => {
     if (!Number.isFinite(bytes) || bytes <= 0 || bytes > spec.maxBytes) {
       return res.status(400).json({ error: `File is too large (max ${Math.round(spec.maxBytes / 1024 / 1024)}MB)` });
     }
+
+    // Free-tier quota: 200 MB per user across everything they upload.
+    if ((req.user.storageUsedBytes || 0) + bytes > MAX_STORAGE_BYTES) {
+      return res.status(413).json({ code: 'storage_limit', error: 'Storage quota exceeded (200 MB limit)' });
+    }
+    await User.updateOne({ id: req.user.id }, { $inc: { storageUsedBytes: bytes } });
 
     const folder = spec.kind === 'image' ? 'img' : 'files';
     const key = `community/${folder}/${crypto.randomBytes(12).toString('base64url')}.${spec.ext}`;
