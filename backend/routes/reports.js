@@ -3,7 +3,7 @@ const Report = require('../models/Report');
 const Post = require('../models/Post');
 const Comment = require('../models/Comment');
 const AuditLog = require('../models/AuditLog');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireAdminUnlock } = require('../middleware/auth');
 const { writeLimiter, readLimiter } = require('../middleware/rateLimit');
 const { sanitizeText } = require('../utils/sanitize');
 const { objectIdParams } = require('../middleware/objectId');
@@ -49,7 +49,7 @@ router.post('/', writeLimiter, requireAuth, async (req, res, next) => {
 });
 
 // ── GET /api/reports (admin) — the moderation queue ──────────────────────────
-router.get('/', readLimiter, requireAuth, requireAdmin, async (req, res, next) => {
+router.get('/', readLimiter, requireAuth, requireAdmin, requireAdminUnlock, async (req, res, next) => {
   try {
     const status = ['open', 'reviewed', 'actioned', 'dismissed'].includes(req.query.status) ? req.query.status : 'open';
     const reports = await Report.find({ status }).sort({ createdAt: -1 }).limit(100).lean();
@@ -58,7 +58,7 @@ router.get('/', readLimiter, requireAuth, requireAdmin, async (req, res, next) =
 });
 
 // ── PATCH /api/reports/:id (admin) — resolve + optionally remove content ──────
-router.patch('/:id', writeLimiter, objectIdParams('id'), requireAuth, requireAdmin, async (req, res, next) => {
+router.patch('/:id', writeLimiter, objectIdParams('id'), requireAuth, requireAdmin, requireAdminUnlock, async (req, res, next) => {
   try {
     const { status, removeContent } = req.body || {};
     const report = await Report.findById(req.params.id);

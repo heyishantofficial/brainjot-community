@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Post = require('../models/Post');
@@ -6,8 +7,8 @@ const Comment = require('../models/Comment');
 const Message = require('../models/Message');
 const Report = require('../models/Report');
 const AuditLog = require('../models/AuditLog');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { readLimiter, writeLimiter } = require('../middleware/rateLimit');
+const { requireAuth, requireAdmin, requireAdminUnlock, adminUnlocked } = require('../middleware/auth');
+const { readLimiter, writeLimiter, makeLimiter } = require('../middleware/rateLimit');
 const { recomputePostHotScore } = require('../services/ranking');
 
 const router = express.Router();
@@ -15,6 +16,58 @@ const router = express.Router();
 // Every route in this file is superadmin-only. The nav link in the frontend is
 // cosmetic — THIS is the actual gate.
 router.use(requireAuth, requireAdmin);
+
+// ── Sudo unlock ──────────────────────────────────────────────────────────────
+// The dashboard needs a second password (ADMIN_DASH_PASSWORD) on top of the
+// superadmin session, so a stolen brainjot login alone can't reach it. Only
+// /unlock, /unlock-status and /reports/count (the nav badge) work while locked.
+
+// Hash both sides so timingSafeEqual gets equal-length buffers.
+function passwordMatches(input) {
+  const a = crypto.createHash('sha256').update(String(input || '')).digest();
+  const b = crypto.createHash('sha256').update(String(process.env.ADMIN_DASH_PASSWORD)).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// A password oracle gets a much tighter budget than normal writes.
+const unlockLimiter = makeLimiter({ name: 'adminunlock', windowMs: 15 * 60 * 1000, max: 10 });
+
+router.get('/unlock-status', readLimiter, (req, res) => {
+  res.json({ configured: !!process.env.ADMIN_DASH_PASSWORD, unlocked: adminUnlocked(req) });
+});
+
+router.post('/unlock', unlockLimiter, async (req, res, next) => {
+  try {
+    if (!process.env.ADMIN_DASH_PASSWORD) {
+      return res.status(503).json({ error: 'Admin password not configured on the server', code: 'ADMIN_PASSWORD_UNSET' });
+    }
+    const ok = passwordMatches(req.body?.password);
+    // Both outcomes land in the audit trail — a run of failures IS the signal
+    // that someone is sitting on a hijacked superadmin session.
+    await AuditLog.create({
+      actorId: req.user.id,
+      actorName: req.user.name,
+      action: ok ? 'admin_unlock' : 'admin_unlock_failed',
+      targetType: 'user',
+      targetId: req.user.id,
+    });
+    if (!ok) return res.status(401).json({ error: 'Wrong password' });
+    req.session.adminUnlockedAt = Date.now();
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/admin/reports/count — powers the shield badge in the navbar ─────
+// Deliberately above the unlock gate: the badge polls this every 30s and a bare
+// count leaks nothing worth a password prompt.
+router.get('/reports/count', readLimiter, async (_req, res, next) => {
+  try {
+    res.json({ open: await Report.countDocuments({ status: 'open' }) });
+  } catch (err) { next(err); }
+});
+
+// Everything below requires the sudo unlock.
+router.use(requireAdminUnlock);
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -98,13 +151,6 @@ router.get('/stats', readLimiter, async (req, res, next) => {
       reports: { open: openReports },
       series: { signups: signupSeries, posts: postSeries, comments: commentSeries },
     });
-  } catch (err) { next(err); }
-});
-
-// ── GET /api/admin/reports/count — powers the shield badge in the navbar ─────
-router.get('/reports/count', readLimiter, async (_req, res, next) => {
-  try {
-    res.json({ open: await Report.countDocuments({ status: 'open' }) });
   } catch (err) { next(err); }
 });
 

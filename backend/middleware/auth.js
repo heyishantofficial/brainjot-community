@@ -34,4 +34,24 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, optionalAuth, requireAdmin };
+// Sudo mode for the admin dashboard: role alone is not enough — the session must
+// also have been unlocked with ADMIN_DASH_PASSWORD recently. Protects against a
+// hijacked (but logged-in) superadmin session. Fail-closed when unconfigured.
+const ADMIN_UNLOCK_TTL = 30 * 60 * 1000;
+
+function adminUnlocked(req) {
+  const at = req.session?.adminUnlockedAt;
+  return typeof at === 'number' && Date.now() - at < ADMIN_UNLOCK_TTL;
+}
+
+function requireAdminUnlock(req, res, next) {
+  if (!process.env.ADMIN_DASH_PASSWORD) {
+    return res.status(503).json({ error: 'Admin password not configured on the server', code: 'ADMIN_PASSWORD_UNSET' });
+  }
+  if (!adminUnlocked(req)) {
+    return res.status(401).json({ error: 'Admin unlock required', code: 'ADMIN_LOCKED' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, optionalAuth, requireAdmin, requireAdminUnlock, adminUnlocked, ADMIN_UNLOCK_TTL };
