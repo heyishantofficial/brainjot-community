@@ -1,0 +1,110 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api } from '../../api';
+
+function fmtDay(day) {
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+// Delta vs the previous 24h window. Sign + arrow carry the direction (never
+// color alone); flat days render a muted "—".
+function Delta({ now, prev }) {
+  const diff = now - prev;
+  if (diff === 0) return <span className="stat-tile__delta muted">— vs prev 24h</span>;
+  const up = diff > 0;
+  return (
+    <span className={`stat-tile__delta ${up ? 'delta--up' : 'delta--down'}`}>
+      {up ? '▲' : '▼'} {up ? '+' : ''}{diff} vs prev 24h
+    </span>
+  );
+}
+
+function StatTile({ label, value, sub, alert, to }) {
+  const body = (
+    <>
+      <div className="stat-tile__label">{label}</div>
+      <div className="stat-tile__value">{value}</div>
+      {sub}
+    </>
+  );
+  const cls = `stat-tile${alert ? ' stat-tile--alert' : ''}`;
+  return to ? <Link to={to} className={cls}>{body}</Link> : <div className={cls}>{body}</div>;
+}
+
+// 14-day single-series mini bar chart. No library: flexbox bars anchored to the
+// baseline, rounded data-end on top, 2px gaps, per-bar hover tooltip. One series
+// per card, so the card title is the legend.
+function MiniBars({ label, series }) {
+  const [hover, setHover] = useState(null);
+  const max = Math.max(1, ...series.map((d) => d.n));
+  const total = series.reduce((a, d) => a + d.n, 0);
+  return (
+    <div className="chart-card">
+      <div className="chart-card__head">
+        <span className="chart-card__title">{label}</span>
+        <span className="muted">{total} in 14d</span>
+      </div>
+      <div className="minibars" onMouseLeave={() => setHover(null)}>
+        {hover != null && (
+          <div className="minibars__tip" style={{ left: `${((hover + 0.5) / series.length) * 100}%` }}>
+            {fmtDay(series[hover].day)} · {series[hover].n}
+          </div>
+        )}
+        {series.map((d, i) => (
+          <div key={d.day} className="minibars__slot" onMouseEnter={() => setHover(i)}>
+            <div
+              className={`minibars__bar${d.n === 0 ? ' minibars__bar--zero' : ''}${hover === i ? ' minibars__bar--hover' : ''}`}
+              style={{ height: d.n === 0 ? '2px' : `${Math.max(6, (d.n / max) * 100)}%` }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="minibars__axis">
+        <span>{fmtDay(series[0].day)}</span>
+        <span>{fmtDay(series[series.length - 1].day)}</span>
+      </div>
+    </div>
+  );
+}
+
+export default function Overview() {
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    api.get('/admin/stats').then(({ data }) => setStats(data)).catch(() => setError(true));
+  }, []);
+
+  if (error) return <p className="empty muted">Couldn't load stats. Refresh to retry.</p>;
+  if (!stats) return <p className="muted">Loading…</p>;
+
+  const { users, posts, comments, reports, series } = stats;
+  return (
+    <div className="admin-overview">
+      <div className="stat-grid">
+        <StatTile
+          label="Open reports" value={reports.open} alert={reports.open > 0} to="/admin/moderation"
+          sub={<span className="stat-tile__delta muted">{reports.open > 0 ? 'needs review →' : 'queue clear'}</span>}
+        />
+        <StatTile label="Active today" value={users.dau} sub={<span className="stat-tile__delta muted">{users.wau} this week</span>} />
+        <StatTile label="New signups · 24h" value={users.last24h} sub={<Delta now={users.last24h} prev={users.prev24h} />} />
+        <StatTile label="Posts · 24h" value={posts.last24h} sub={<Delta now={posts.last24h} prev={posts.prev24h} />} />
+        <StatTile label="Comments · 24h" value={comments.last24h} sub={<Delta now={comments.last24h} prev={comments.prev24h} />} />
+        <StatTile
+          label="Total users" value={users.total}
+          sub={<span className="stat-tile__delta muted">{users.banned} banned</span>}
+        />
+      </div>
+
+      <div className="chart-grid">
+        <MiniBars label="Signups" series={series.signups} />
+        <MiniBars label="Posts" series={series.posts} />
+        <MiniBars label="Comments" series={series.comments} />
+      </div>
+
+      <p className="muted admin-footnote">
+        Totals: {posts.total} active posts · {comments.total} active comments. Daily bars are UTC days; “24h” tiles are rolling windows.
+      </p>
+    </div>
+  );
+}

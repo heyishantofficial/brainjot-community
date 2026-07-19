@@ -2,6 +2,7 @@ const express = require('express');
 const Report = require('../models/Report');
 const Post = require('../models/Post');
 const Comment = require('../models/Comment');
+const AuditLog = require('../models/AuditLog');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { writeLimiter, readLimiter } = require('../middleware/rateLimit');
 const { sanitizeText } = require('../utils/sanitize');
@@ -81,6 +82,16 @@ router.patch('/:id', writeLimiter, objectIdParams('id'), requireAuth, requireAdm
       if (report.targetType === 'post') await Post.updateOne({ _id: report.targetId }, { $set: { status: 'removed' } });
       if (report.targetType === 'comment') await Comment.updateOne({ _id: report.targetId }, { $set: { status: 'removed', body: '' } });
     }
+
+    // Resolutions land in the audit trail alongside bans/purges (routes/admin.js).
+    await AuditLog.create({
+      actorId: req.user.id,
+      actorName: req.user.name,
+      action: `report_${report.status}`,
+      targetType: 'report',
+      targetId: String(report._id),
+      meta: { targetType: report.targetType, targetId: report.targetId, reason: report.reason, removedContent: !!removeContent },
+    });
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

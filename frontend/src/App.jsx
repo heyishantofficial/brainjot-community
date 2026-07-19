@@ -9,13 +9,17 @@ import Messenger from './pages/Messenger';
 import Notifications from './pages/Notifications';
 import Search from './pages/Search';
 import Saved from './pages/Saved';
+import Admin from './pages/admin/Admin';
+import Overview from './pages/admin/Overview';
+import Moderation from './pages/admin/Moderation';
+import Users from './pages/admin/Users';
 import { AuthProvider, useAuth } from './auth';
 import { api } from './api';
 import { syncPushIfGranted } from './push';
 
 function Shell() {
   const { user, loading } = useAuth();
-  const [badges, setBadges] = useState({ notifications: 0, messages: 0 });
+  const [badges, setBadges] = useState({ notifications: 0, messages: 0, admin: 0 });
 
   // Re-attach this browser's web-push subscription on login. Silent — only
   // runs when notification permission was already granted (the prompt lives
@@ -28,12 +32,17 @@ function Shell() {
   // visible, slower when hidden, refreshed on tab focus and whenever a page
   // dispatches 'badges:refresh' (e.g. after marking notifications read).
   useEffect(() => {
-    if (!user) { setBadges({ notifications: 0, messages: 0 }); return; }
+    if (!user) { setBadges({ notifications: 0, messages: 0, admin: 0 }); return; }
     let timer; let cancelled = false;
     async function refresh() {
       try {
         const { data } = await api.get('/notifications/badges');
-        if (!cancelled) setBadges({ notifications: data.notifications, messages: data.messages });
+        // Superadmins also poll the open-report count for the shield badge.
+        let admin = 0;
+        if (user.role === 'superadmin') {
+          try { admin = (await api.get('/admin/reports/count')).data.open; } catch { /* ignore */ }
+        }
+        if (!cancelled) setBadges({ notifications: data.notifications, messages: data.messages, admin });
       } catch { /* ignore transient errors */ }
       if (!cancelled) timer = setTimeout(refresh, document.hidden ? 90000 : 30000);
     }
@@ -65,6 +74,11 @@ function Shell() {
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/search" element={<Search />} />
         <Route path="/saved" element={<Saved />} />
+        <Route path="/admin" element={<Admin />}>
+          <Route index element={<Overview />} />
+          <Route path="moderation" element={<Moderation />} />
+          <Route path="users" element={<Users />} />
+        </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

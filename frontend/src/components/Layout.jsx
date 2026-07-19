@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { PenSquare, MessageCircle, ArrowLeft, LogOut, Bell, Bookmark, Search } from 'lucide-react';
+import { PenSquare, MessageCircle, ArrowLeft, LogOut, Bell, Bookmark, Search, ShieldCheck } from 'lucide-react';
 import Avatar from './Avatar';
 import Composer from './Composer';
 import { useAuth } from '../auth';
 import { MAIN_APP_URL } from '../api';
 import { profilePath } from '../utils';
 
-export default function Layout({ children, badges = { notifications: 0, messages: 0 } }) {
+export default function Layout({ children, badges = { notifications: 0, messages: 0, admin: 0 } }) {
   const { user, login, logout } = useAuth();
   const [composing, setComposing] = useState(false);
   const [query, setQuery] = useState('');
@@ -15,6 +15,8 @@ export default function Layout({ children, badges = { notifications: 0, messages
   const { pathname } = useLocation();
   // The messenger is a full-bleed split view — no centered column, no padding.
   const isMessenger = pathname.startsWith('/messages');
+  // Admin gets a wider column: dense tables + chart grids need the room.
+  const isAdmin = pathname.startsWith('/admin');
 
   function submitSearch(e) {
     e.preventDefault();
@@ -45,6 +47,12 @@ export default function Layout({ children, badges = { notifications: 0, messages
                 <button className="btn btn--primary btn--sm" onClick={() => setComposing(true)}>
                   <PenSquare size={16} /> <span className="hide-sm">Post</span>
                 </button>
+                {user.role === 'superadmin' && (
+                  <Link to="/admin" className="icon-btn icon-btn--badge" title="Admin dashboard">
+                    <ShieldCheck size={20} />
+                    {badges.admin > 0 && <span className="badge">{badges.admin > 9 ? '9+' : badges.admin}</span>}
+                  </Link>
+                )}
                 <Link to="/notifications" className="icon-btn icon-btn--badge" title="Notifications">
                   <Bell size={20} />
                   {badges.notifications > 0 && <span className="badge">{badges.notifications > 9 ? '9+' : badges.notifications}</span>}
@@ -66,7 +74,7 @@ export default function Layout({ children, badges = { notifications: 0, messages
         </div>
       </header>
 
-      <main className={`content${isMessenger ? ' content--messenger' : ''}`}>{children}</main>
+      <main className={`content${isMessenger ? ' content--messenger' : ''}${isAdmin ? ' content--admin' : ''}`}>{children}</main>
 
       {composing && <Composer onClose={() => setComposing(false)} onCreated={(p) => navigate(`/post/${p.id}`)} />}
     </div>

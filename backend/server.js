@@ -6,6 +6,7 @@ const pinoHttp = require('pino-http');
 const logger = require('./utils/logger');
 const { connectDB } = require('./config/db');
 const { buildSessionMiddleware } = require('./config/stores');
+const User = require('./models/User');
 
 // ── CORS: allow the community frontend + any *.brainjot.space subdomain ───────
 function buildAllowedOrigins() {
@@ -30,12 +31,11 @@ function isAllowedOrigin(origin) {
   } catch { return false; }
 }
 
-// Build the Express app. No DB connect, no listen — so it can be exported as a
-// Vercel serverless handler (@vercel/node wraps the exported app) AND started as
-// a normal long-running server for local dev (see the bottom of this file).
+// Build the Express app. No DB connect, no listen — the app is assembled here
+// and started at the bottom of this file (keeps it importable for tests).
 function createApp() {
   const app = express();
-  app.set('trust proxy', 1); // behind Vercel's proxy / a load balancer
+  app.set('trust proxy', 1); // behind Dokploy's reverse proxy (Traefik)
 
   app.use(pinoHttp({
     logger,
@@ -60,9 +60,9 @@ function createApp() {
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
   // ── Ensure-DB gate ─────────────────────────────────────────────────────
-  // Every API request awaits the cached connection first. Warm invocations
-  // resolve instantly; cold ones connect once. This is what makes Mongoose
-  // safe on serverless.
+  // Every API request awaits the cached connection first. Once connected it
+  // resolves instantly; if the DB dropped, this reconnects instead of letting
+  // routes fail on a dead connection.
   app.use(async (_req, res, next) => {
     try { await connectDB(); next(); } catch (err) {
       logger.error({ err }, '[db] connect failed for request');
@@ -70,7 +70,7 @@ function createApp() {
     }
   });
 
-  // Sessions (Mongo-backed → serverless-safe, shared across instances).
+  // Sessions (Mongo-backed, shared across instances and restarts).
   app.use(buildSessionMiddleware());
 
   // Idle session timeout (4h). lastActivity is only rewritten when it's >5 min
@@ -84,7 +84,13 @@ function createApp() {
       if (last && now - last > 4 * 60 * 60 * 1000) {
         return req.session.destroy(() => next());
       }
-      if (!last || now - last > 5 * 60 * 1000) req.session.lastActivity = now;
+      if (!last || now - last > 5 * 60 * 1000) {
+        req.session.lastActivity = now;
+        // Piggyback DAU tracking on the same 5-min granularity: without this,
+        // lastSeenAt only moves at SSO login and the admin dashboard's DAU
+        // number undercounts anyone riding a long session. Fire-and-forget.
+        User.updateOne({ id: req.session.userId }, { $set: { lastSeenAt: new Date(now) } }).catch(() => {});
+      }
     }
     next();
   });
@@ -96,6 +102,7 @@ function createApp() {
   app.use('/api/conversations', require('./routes/messages').router);
   app.use('/api/users', require('./routes/users').router);
   app.use('/api/reports', require('./routes/reports').router);
+  app.use('/api/admin', require('./routes/admin').router);
   app.use('/api/notifications', require('./routes/notifications').router);
   app.use('/api/uploads', require('./routes/uploads').router);
   // Feature flags the frontend reads once at boot.
@@ -113,8 +120,8 @@ function createApp() {
 
 const app = createApp();
 
-// Local dev / any long-running host: connect, then listen. On Vercel this block
-// is skipped (the file is imported, not run directly) and `app` is the handler.
+// Connect, then listen. Skipped when the file is imported (e.g. tests) rather
+// than run directly.
 if (require.main === module) {
   const port = process.env.PORT || 4000;
   connectDB()
