@@ -64,7 +64,10 @@ router.patch('/:id', writeLimiter, objectIdParams('id'), requireAuth, requireAdm
     const report = await Report.findById(req.params.id);
     if (!report) return res.status(404).json({ error: 'Not found' });
     const wasCounted = report.status !== 'dismissed';
-    if (['reviewed', 'actioned', 'dismissed'].includes(status)) report.status = status;
+    if (['reviewed', 'actioned', 'dismissed'].includes(status)) {
+      report.status = status;
+      if (!report.resolvedAt) report.resolvedAt = new Date(); // first resolution wins — SLA measures time-to-FIRST-action
+    }
     await report.save();
 
     // A dismissed report was a false alarm — refund the ranking penalty.

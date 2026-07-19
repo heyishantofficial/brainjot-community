@@ -7,6 +7,7 @@ const logger = require('./utils/logger');
 const { connectDB } = require('./config/db');
 const { buildSessionMiddleware } = require('./config/stores');
 const User = require('./models/User');
+const { recordActivity } = require('./utils/weeks');
 
 // ── CORS: allow the community frontend + any *.brainjot.space subdomain ───────
 function buildAllowedOrigins() {
@@ -90,6 +91,7 @@ function createApp() {
         // lastSeenAt only moves at SSO login and the admin dashboard's DAU
         // number undercounts anyone riding a long session. Fire-and-forget.
         User.updateOne({ id: req.session.userId }, { $set: { lastSeenAt: new Date(now) } }).catch(() => {});
+        recordActivity(req.session.userId); // weekly-activity row → growth accounting + cohorts
       }
     }
     next();

@@ -11,6 +11,7 @@ const reportSchema = new mongoose.Schema({
   detail: { type: String, default: '', maxlength: 500 },
   status: { type: String, enum: ['open', 'reviewed', 'actioned', 'dismissed'], default: 'open', index: true },
   createdAt: { type: Date, default: Date.now },
+  resolvedAt: { type: Date, default: null }, // set on first resolution; powers the report-SLA metric
 }, { minimize: false });
 
 reportSchema.index({ reporterId: 1, targetType: 1, targetId: 1 }, { unique: true });

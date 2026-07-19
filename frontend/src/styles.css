@@ -542,3 +542,24 @@ a.stat-tile:hover { border-color: var(--accent); }
 .admin-lock h2 { margin: 0; font-size: 18px; }
 .admin-lock__form { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 6px; }
 .admin-lock__error { color: var(--danger); font-size: 13px; margin: 0; }
+
+/* Admin: growth section, cohort heatmap, funnel, audit log */
+.admin-section-title { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 26px 0 12px; }
+.cohort-scroll { overflow-x: auto; }
+.cohort-table { border-collapse: separate; border-spacing: 3px; font-size: 11.5px; }
+.cohort-table th { color: var(--muted); font-weight: 600; padding: 2px 6px; text-align: center; }
+.cohort-table__week { color: var(--muted); padding: 2px 8px; white-space: nowrap; }
+.cohort-table__size { text-align: center; font-weight: 700; }
+.cohort-cell { width: 46px; height: 26px; text-align: center; border-radius: 6px; font-weight: 700; color: var(--text); }
+.funnel { display: flex; flex-direction: column; gap: 8px; max-width: 560px; }
+.funnel__row { display: grid; grid-template-columns: minmax(180px, 1fr) 2fr 40px; gap: 10px; align-items: center; font-size: 13px; }
+.funnel__label { color: var(--muted); }
+.funnel__track { background: var(--bg-elev2); border-radius: 5px; height: 8px; overflow: hidden; }
+.funnel__bar { background: var(--accent); opacity: .8; height: 100%; border-radius: 5px; }
+.funnel__value { font-weight: 700; text-align: right; }
+.admin-audit__filter { max-width: 260px; width: auto; }
+.audit-row { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 6px; }
+.audit-row__action { font-weight: 700; }
+.audit-row__action--danger { color: var(--danger); }
+.audit-row__meta { font-size: 11px; overflow-wrap: anywhere; }
+.audit-row__time { margin-left: auto; white-space: nowrap; }

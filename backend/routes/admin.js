@@ -7,9 +7,11 @@ const Comment = require('../models/Comment');
 const Message = require('../models/Message');
 const Report = require('../models/Report');
 const AuditLog = require('../models/AuditLog');
+const UserActivity = require('../models/UserActivity');
 const { requireAuth, requireAdmin, requireAdminUnlock, adminUnlocked } = require('../middleware/auth');
 const { readLimiter, writeLimiter, makeLimiter } = require('../middleware/rateLimit');
 const { recomputePostHotScore } = require('../services/ranking');
+const { mondayOf, weekKey } = require('../utils/weeks');
 
 const router = express.Router();
 
@@ -144,12 +146,161 @@ router.get('/stats', readLimiter, async (req, res, next) => {
       dailySeries(Comment, seriesStart, 14),
     ]);
 
+    // Moderation SLA: how long reports wait before the first action, plus
+    // throughput. Slow SLA = users see spam sit, and stop reporting.
+    const d30 = new Date(now - 30 * DAY);
+    const [resolved30d, oldestOpen, resolvedPerDay] = await Promise.all([
+      Report.find({ resolvedAt: { $gte: d30 } }).select('createdAt resolvedAt -_id').lean(),
+      Report.findOne({ status: 'open' }).sort({ createdAt: 1 }).select('createdAt -_id').lean(),
+      Report.aggregate([
+        { $match: { resolvedAt: { $gte: seriesStart } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$resolvedAt' } }, n: { $sum: 1 } } },
+      ]),
+    ]);
+    const waits = resolved30d.map((r) => r.resolvedAt - r.createdAt).sort((a, b) => a - b);
+    const medianResolveHours = waits.length ? +((waits[Math.floor(waits.length / 2)] / 3600000).toFixed(1)) : null;
+    const perDayMap = Object.fromEntries(resolvedPerDay.map((r) => [r._id, r.n]));
+    const throughput = Array.from({ length: 14 }, (_, i) => {
+      const day = new Date(seriesStart.getTime() + i * DAY).toISOString().slice(0, 10);
+      return { day, n: perDayMap[day] || 0 };
+    });
+
     res.json({
       users: { total: totalUsers, banned: bannedUsers, dau, wau, last24h: signups24h, prev24h: signupsPrev },
       posts: { total: totalPosts, last24h: posts24h, prev24h: postsPrev },
       comments: { total: totalComments, last24h: comments24h, prev24h: commentsPrev },
-      reports: { open: openReports },
+      reports: {
+        open: openReports,
+        medianResolveHours,
+        resolved30d: resolved30d.length,
+        oldestOpenHours: oldestOpen ? +(((now - oldestOpen.createdAt) / 3600000).toFixed(1)) : null,
+        throughput,
+      },
       series: { signups: signupSeries, posts: postSeries, comments: commentSeries },
+    });
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/admin/growth — accounting, cohorts, activation funnel ───────────
+// Weekly activity history comes from UserActivity, which only started
+// recording when this shipped — accounting and cohorts become fully accurate
+// after 2+ weeks of data. The activation funnel is exact already (computed
+// from posts/comments, which carry their own timestamps).
+const WEEK = 7 * DAY;
+
+router.get('/growth', readLimiter, async (_req, res, next) => {
+  try {
+    const thisMonday = mondayOf(new Date());
+    const lastMonday = new Date(thisMonday.getTime() - WEEK);
+
+    const [activeThis, activeLast, newThisWeek] = await Promise.all([
+      UserActivity.distinct('userId', { week: weekKey(thisMonday) }),
+      UserActivity.distinct('userId', { week: weekKey(lastMonday) }),
+      User.countDocuments({ createdAt: { $gte: thisMonday } }),
+    ]);
+    const lastSet = new Set(activeLast);
+    const thisSet = new Set(activeThis);
+    const retained = activeThis.filter((id) => lastSet.has(id)).length;
+    const churned = activeLast.filter((id) => !thisSet.has(id)).length;
+    const candidates = activeThis.filter((id) => !lastSet.has(id));
+    const resurrected = candidates.length
+      ? await User.countDocuments({ id: { $in: candidates }, createdAt: { $lt: lastMonday } })
+      : 0;
+    const quickRatio = churned > 0 ? +(((newThisWeek + resurrected) / churned).toFixed(2)) : null;
+
+    // Cohorts: last 8 signup weeks × weeks-since-signup activity %.
+    const cohortStart = new Date(thisMonday.getTime() - 7 * WEEK);
+    const cohortUsers = await User.find({ createdAt: { $gte: cohortStart } }).select('id createdAt -_id').lean();
+    const ids = cohortUsers.map((u) => u.id);
+    const activity = ids.length
+      ? await UserActivity.find({ userId: { $in: ids } }).select('userId week -_id').lean()
+      : [];
+    const activeWeeksByUser = new Map();
+    for (const a of activity) {
+      if (!activeWeeksByUser.has(a.userId)) activeWeeksByUser.set(a.userId, new Set());
+      activeWeeksByUser.get(a.userId).add(a.week);
+    }
+    const cohorts = [];
+    for (let w = 7; w >= 0; w--) {
+      const start = new Date(thisMonday.getTime() - w * WEEK);
+      const members = cohortUsers.filter((u) => weekKey(u.createdAt) === weekKey(start));
+      const cells = [];
+      for (let offset = 0; offset <= w; offset++) {
+        const key = weekKey(new Date(start.getTime() + offset * WEEK));
+        const active = members.filter((u) => activeWeeksByUser.get(u.id)?.has(key)).length;
+        cells.push(members.length ? Math.round((active / members.length) * 100) : null);
+      }
+      cohorts.push({ week: weekKey(start), size: members.length, cells });
+    }
+
+    // Activation funnel: signup → posted or commented within week 1 → active in week 2.
+    const signupAt = new Map(cohortUsers.map((u) => [u.id, new Date(u.createdAt).getTime()]));
+    const [firstPosts, firstComments] = ids.length ? await Promise.all([
+      Post.aggregate([
+        { $match: { authorId: { $in: ids } } },
+        { $group: { _id: '$authorId', first: { $min: '$createdAt' } } },
+      ]),
+      Comment.aggregate([
+        { $match: { authorId: { $in: ids } } },
+        { $group: { _id: '$authorId', first: { $min: '$createdAt' } } },
+      ]),
+    ]) : [[], []];
+    const contributedWk1 = new Set();
+    for (const rows of [firstPosts, firstComments]) {
+      for (const r of rows) {
+        const t0 = signupAt.get(r._id);
+        if (t0 != null && new Date(r.first).getTime() - t0 <= 7 * DAY) contributedWk1.add(r._id);
+      }
+    }
+    const returnedWeek2 = cohortUsers.filter((u) => {
+      const nextWeek = weekKey(new Date(mondayOf(u.createdAt).getTime() + WEEK));
+      return activeWeeksByUser.get(u.id)?.has(nextWeek);
+    }).length;
+
+    res.json({
+      accounting: {
+        weekOf: weekKey(thisMonday),
+        activeThisWeek: activeThis.length,
+        activeLastWeek: activeLast.length,
+        new: newThisWeek,
+        retained,
+        resurrected,
+        churned,
+        quickRatio,
+      },
+      cohorts,
+      funnel: {
+        windowWeeks: 8,
+        signedUp: ids.length,
+        contributedWk1: contributedWk1.size, // posted or commented in week 1 = ACTIVATED
+        returnedWeek2,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/admin/audit — the audit-log viewer ──────────────────────────────
+router.get('/audit', readLimiter, async (req, res, next) => {
+  try {
+    const page = Math.max(0, parseInt(req.query.page, 10) || 0);
+    const filter = {};
+    if (req.query.action) filter.action = String(req.query.action);
+    const [items, total, actions] = await Promise.all([
+      AuditLog.find(filter).sort({ createdAt: -1 }).skip(page * 50).limit(50).lean(),
+      AuditLog.countDocuments(filter),
+      AuditLog.distinct('action'),
+    ]);
+    res.json({
+      items: items.map((i) => ({
+        action: i.action,
+        actorName: i.actorName || i.actorId,
+        targetType: i.targetType,
+        targetId: i.targetId,
+        meta: i.meta || {},
+        createdAt: i.createdAt,
+      })),
+      total,
+      actions: actions.sort(),
     });
   } catch (err) { next(err); }
 });
@@ -354,7 +505,7 @@ router.patch('/users/:id', writeLimiter, async (req, res, next) => {
             { targetType: 'user', targetId: user.id },
           ],
         },
-        { $set: { status: 'actioned' } },
+        { $set: { status: 'actioned', resolvedAt: new Date() } },
       );
 
       audit.push({ action: 'purge_content', targetType: 'user', targetId: user.id, meta: purged });

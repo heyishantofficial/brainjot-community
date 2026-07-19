@@ -1,13 +1,47 @@
+const crypto = require('crypto');
 const express = require('express');
 const User = require('../models/User');
 const Post = require('../models/Post');
 const Comment = require('../models/Comment');
 const Endorsement = require('../models/Endorsement');
 const Conversation = require('../models/Conversation');
+const AdminLogin = require('../models/AdminLogin');
+const AuditLog = require('../models/AuditLog');
 const { verifySsoToken } = require('../utils/sso');
 const { requireAuth } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
+const { recordActivity } = require('../utils/weeks');
+const { sendPushToUser } = require('../services/push');
 const logger = require('../utils/logger');
+
+// A superadmin SSO login from a UA+IP combo we've never seen → push a warning
+// to the admin's own devices and drop an audit entry. Fire-and-forget.
+async function checkAdminDevice(req, user) {
+  try {
+    const deviceKey = crypto.createHash('sha256')
+      .update(`${req.headers['user-agent'] || ''}|${req.ip || ''}`)
+      .digest('hex').slice(0, 16);
+    const existing = await AdminLogin.findOneAndUpdate(
+      { userId: user.id, deviceKey },
+      { $setOnInsert: { userId: user.id, deviceKey, createdAt: new Date() } },
+      { upsert: true, new: false },
+    );
+    if (existing) return; // known device
+    await AuditLog.create({
+      actorId: user.id, actorName: user.name,
+      action: 'admin_new_device_login', targetType: 'user', targetId: user.id,
+      meta: { ip: req.ip || '', deviceKey },
+    });
+    sendPushToUser(user.id, {
+      title: '⚠️ New device sign-in (superadmin)',
+      body: "Your community superadmin account signed in from a new device or network. If this wasn't you, secure your brainjot account now.",
+      url: '/',
+      tag: 'admin-new-device',
+    });
+  } catch (err) {
+    logger.warn({ err }, '[auth] admin device check failed (non-fatal)');
+  }
+}
 
 const router = express.Router();
 
@@ -73,7 +107,11 @@ router.post('/sso-login', authLimiter, async (req, res) => {
     req.session.userId = user.id;
     req.session.lastActivity = Date.now();
 
-    res.json({ user: publicUser(user) });
+    recordActivity(user.id); // a login IS activity — seeds this week's row
+    if (user.role === 'superadmin') checkAdminDevice(req, user);
+
+    // isNew lets the frontend fire signed_up vs logged_in analytics correctly.
+    res.json({ user: publicUser(user), isNew: !before });
   } catch (err) {
     logger.error({ err }, '[sso] login failed');
     res.status(500).json({ error: 'Login failed' });

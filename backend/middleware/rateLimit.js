@@ -78,6 +78,8 @@ class SharedMongoStore {
   }
 }
 
+let tripIndexEnsured = false;
+
 function makeLimiter({ windowMs, max, name }) {
   const opts = {
     windowMs,
@@ -87,7 +89,19 @@ function makeLimiter({ windowMs, max, name }) {
     // Key by authenticated user when possible, else by IP (IPv6-normalized via
     // the library helper so v6 users can't sidestep the limit per-address).
     keyGenerator: (req) => req.session?.userId || ipKeyGenerator(req.ip),
-    message: { error: 'Too many requests. Please slow down.' },
+    // Record every trip (30-day TTL, ensured lazily) — the admin dashboard
+    // charts these; a spike is the early sign of abuse or a runaway client.
+    handler: (req, res) => {
+      try {
+        const col = mongoose.connection.db.collection('ratelimit_trips');
+        col.insertOne({ name, userId: req.session?.userId || null, ip: req.ip || '', at: new Date() }).catch(() => {});
+        if (!tripIndexEnsured) {
+          tripIndexEnsured = true;
+          col.createIndex({ at: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }).catch(() => {});
+        }
+      } catch { /* recording must never break the 429 */ }
+      res.status(429).json({ error: 'Too many requests. Please slow down.' });
+    },
   };
 
   // Shared store in production; per-process memory store is fine for local dev.

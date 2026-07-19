@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { bootstrapSession, logout as apiLogout, redirectToLogin } from './api';
+import { identifyUser } from './analytics';
 
 const AuthContext = createContext(null);
 
@@ -10,6 +11,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let alive = true;
     bootstrapSession().then((u) => {
+      if (u) identifyUser(u);
       if (alive) { setUser(u); setLoading(false); }
     });
     return () => { alive = false; };

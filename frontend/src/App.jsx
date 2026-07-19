@@ -13,6 +13,7 @@ import Admin from './pages/admin/Admin';
 import Overview from './pages/admin/Overview';
 import Moderation from './pages/admin/Moderation';
 import Users from './pages/admin/Users';
+import Audit from './pages/admin/Audit';
 import { AuthProvider, useAuth } from './auth';
 import { api } from './api';
 import { syncPushIfGranted } from './push';
@@ -78,6 +79,7 @@ function Shell() {
           <Route index element={<Overview />} />
           <Route path="moderation" element={<Moderation />} />
           <Route path="users" element={<Users />} />
+          <Route path="audit" element={<Audit />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

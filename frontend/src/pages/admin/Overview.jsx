@@ -67,12 +67,82 @@ function MiniBars({ label, series }) {
   );
 }
 
+// Growth accounting + cohort retention, computed server-side from DB truth.
+function GrowthSection({ growth }) {
+  if (!growth) return null;
+  const a = growth.accounting;
+  const funnel = [
+    { label: `Signed up (last ${growth.funnel.windowWeeks} wks)`, value: growth.funnel.signedUp },
+    { label: 'Activated — posted or commented in week 1', value: growth.funnel.contributedWk1 },
+    { label: 'Returned in week 2', value: growth.funnel.returnedWeek2 },
+  ];
+  const fmax = Math.max(1, ...funnel.map((f) => f.value));
+  return (
+    <>
+      <h3 className="admin-section-title">Growth — week of {a.weekOf}</h3>
+      <div className="stat-grid">
+        <div className="stat-tile"><div className="stat-tile__label">Active this week</div><div className="stat-tile__value">{a.activeThisWeek}</div><span className="stat-tile__delta muted">{a.activeLastWeek} last week</span></div>
+        <div className="stat-tile"><div className="stat-tile__label">New</div><div className="stat-tile__value">{a.new}</div></div>
+        <div className="stat-tile"><div className="stat-tile__label">Retained</div><div className="stat-tile__value">{a.retained}</div></div>
+        <div className="stat-tile"><div className="stat-tile__label">Resurrected</div><div className="stat-tile__value">{a.resurrected}</div></div>
+        <div className="stat-tile"><div className="stat-tile__label">Churned</div><div className="stat-tile__value">{a.churned}</div></div>
+        <div className="stat-tile">
+          <div className="stat-tile__label">Quick ratio</div>
+          <div className="stat-tile__value">{a.quickRatio == null ? '—' : a.quickRatio}</div>
+          <span className={`stat-tile__delta ${a.quickRatio == null ? 'muted' : a.quickRatio >= 1 ? 'delta--up' : 'delta--down'}`}>(new+resurrected) / churned</span>
+        </div>
+      </div>
+      <p className="muted admin-footnote">Weekly activity recording started with this release — retained / resurrected / churned become fully accurate after two weeks of data.</p>
+
+      <h3 className="admin-section-title">Cohort retention (% of each signup week active later)</h3>
+      <div className="cohort-scroll">
+        <table className="cohort-table">
+          <thead>
+            <tr><th>Cohort</th><th>Size</th>{Array.from({ length: 8 }, (_, i) => <th key={i}>W{i}</th>)}</tr>
+          </thead>
+          <tbody>
+            {growth.cohorts.map((c) => (
+              <tr key={c.week}>
+                <td className="cohort-table__week">{c.week}</td>
+                <td className="cohort-table__size">{c.size}</td>
+                {Array.from({ length: 8 }, (_, i) => {
+                  const v = c.cells[i];
+                  const filled = v != null && c.size > 0;
+                  return (
+                    <td key={i} className="cohort-cell" title={filled ? `${v}% active` : ''}
+                      style={filled ? { background: `color-mix(in srgb, var(--accent) ${12 + v * 0.6}%, transparent)` } : undefined}>
+                      {filled ? `${v}%` : ''}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="admin-section-title">Activation funnel</h3>
+      <div className="funnel">
+        {funnel.map((f) => (
+          <div key={f.label} className="funnel__row">
+            <span className="funnel__label">{f.label}</span>
+            <div className="funnel__track"><div className="funnel__bar" style={{ width: `${(f.value / fmax) * 100}%` }} /></div>
+            <span className="funnel__value">{f.value}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export default function Overview() {
   const [stats, setStats] = useState(null);
+  const [growth, setGrowth] = useState(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     api.get('/admin/stats').then(({ data }) => setStats(data)).catch(() => setError(true));
+    api.get('/admin/growth').then(({ data }) => setGrowth(data)).catch(() => {});
   }, []);
 
   if (error) return <p className="empty muted">Couldn't load stats. Refresh to retry.</p>;
@@ -101,6 +171,23 @@ export default function Overview() {
         <MiniBars label="Posts" series={series.posts} />
         <MiniBars label="Comments" series={series.comments} />
       </div>
+
+      <h3 className="admin-section-title">Moderation SLA</h3>
+      <div className="stat-grid">
+        <div className="stat-tile">
+          <div className="stat-tile__label">Median time to action</div>
+          <div className="stat-tile__value">{reports.medianResolveHours == null ? '—' : `${reports.medianResolveHours}h`}</div>
+          <span className="stat-tile__delta muted">{reports.resolved30d} resolved · 30d</span>
+        </div>
+        <div className={`stat-tile${reports.oldestOpenHours > 24 ? ' stat-tile--alert' : ''}`}>
+          <div className="stat-tile__label">Oldest waiting report</div>
+          <div className="stat-tile__value">{reports.oldestOpenHours == null ? '—' : `${reports.oldestOpenHours}h`}</div>
+          <span className="stat-tile__delta muted">{reports.oldestOpenHours == null ? 'queue empty' : 'red past 24h'}</span>
+        </div>
+      </div>
+      {reports.throughput && <div className="chart-grid"><MiniBars label="Reports resolved" series={reports.throughput} /></div>}
+
+      <GrowthSection growth={growth} />
 
       <p className="muted admin-footnote">
         Totals: {posts.total} active posts · {comments.total} active comments. Daily bars are UTC days; “24h” tiles are rolling windows.

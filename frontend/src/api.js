@@ -1,15 +1,46 @@
 import axios from 'axios';
+import { track, resetAnalytics } from './analytics';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/+$/, '');
 // The main app's FRONTEND (login page, dashboard) — used for links/redirects only.
 export const MAIN_APP_URL = (import.meta.env.VITE_MAIN_APP_URL || 'https://app.brainjot.space').replace(/\/+$/, '');
-// The main app's BACKEND API — a separate Vercel project/domain from the
+// The main app's BACKEND API — may live on a separate domain from the
 // frontend above. This is the one that actually serves /api/community/sso-token.
 // Falls back to MAIN_APP_URL for setups where frontend+backend share one origin.
 export const MAIN_API_URL = (import.meta.env.VITE_MAIN_API_URL || MAIN_APP_URL).replace(/\/+$/, '');
 
 // withCredentials → the community session cookie rides along on every request.
 export const api = axios.create({ baseURL: API_URL + '/api', withCredentials: true });
+
+// ── Event taxonomy, fired centrally ──────────────────────────────────────────
+// One interceptor maps successful POSTs to analytics events, so no call site
+// can forget them. Patterns are matched against the request path only.
+const EVENT_ROUTES = [
+  [/^\/posts$/, () => ['post_created', {}]],
+  [/^\/comments$/, () => ['comment_created', {}]],
+  [/^\/posts\/[^/]+\/vote$/, () => ['vote_cast', { target: 'post' }]],
+  [/^\/comments\/[^/]+\/vote$/, () => ['vote_cast', { target: 'comment' }]],
+  [/^\/conversations$/, (body) => ['collab_request', { from_post: !!body?.originPostId }]],
+  [/^\/conversations\/[^/]+\/request$/, (body) => ['collab_request_responded', { action: body?.action }]],
+  [/^\/conversations\/[^/]+\/messages$/, () => ['dm_sent', {}]],
+  [/^\/notifications\/push\/subscribe$/, () => ['push_enabled', {}]],
+];
+
+api.interceptors.response.use((res) => {
+  if (res.config?.method === 'post') {
+    const path = (res.config.url || '').split('?')[0];
+    for (const [re, toEvent] of EVENT_ROUTES) {
+      if (re.test(path)) {
+        let body = res.config.data;
+        try { if (typeof body === 'string') body = JSON.parse(body); } catch { body = null; }
+        const ev = toEvent(body);
+        if (ev) track(ev[0], ev[1]);
+        break;
+      }
+    }
+  }
+  return res;
+});
 
 // ── SSO bootstrap ────────────────────────────────────────────────────────────
 // 1. Ask the community backend who we are (/auth/me).
@@ -32,6 +63,7 @@ export async function bootstrapSession() {
     const token = tokenRes.data?.token;
     if (!token) return null;
     const { data } = await api.post('/auth/sso-login', { token });
+    track(data.isNew ? 'signed_up' : 'logged_in', { method: 'sso' });
     return data.user;
   } catch {
     return null; // guest — not logged into the main app
@@ -46,6 +78,7 @@ export function redirectToLogin() {
 
 export async function logout() {
   try { await api.post('/auth/logout'); } catch { /* ignore */ }
+  resetAnalytics(); // next login on this browser must not inherit this identity
 }
 
 // Deep link into the main app's existing invite flow (the collab→project bridge).
