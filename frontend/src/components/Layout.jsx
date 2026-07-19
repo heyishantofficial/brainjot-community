@@ -147,26 +147,29 @@ export default function Layout({ children, badges = { notifications: 0, messages
 
       {topicsOpen && (
         <>
-          <div className="topic-sheet__backdrop" onClick={() => setTopicsOpen(false)} />
-          <div className="topic-sheet">
-            <h3>Topics</h3>
-            <div className="topic-list">
-              {topics.length === 0 && <p className="muted">Loading…</p>}
-              {topics.map((t) => (
-                <div key={t.slug} className={`topic-pill ${activeTopic === t.slug ? 'active' : ''}`}>
-                  <button className="topic-pill__main" onClick={() => pickTopic(t.slug)}>
-                    <span>{t.emoji}</span> {t.label}
+          <div className="topic-dial__backdrop" onClick={() => setTopicsOpen(false)} />
+          {/* Speed-dial: emoji circles + label chips fan up from the × FAB. */}
+          <div className="topic-dial">
+            <button className="topic-dial__close" onClick={() => setTopicsOpen(false)} title="Close">
+              <X size={22} />
+            </button>
+            {topics.length === 0 && <span className="topic-dial__label">Loading…</span>}
+            {topics.map((t, i) => (
+              <div key={t.slug} className={`topic-dial__row${activeTopic === t.slug ? ' active' : ''}`}
+                style={{ animationDelay: `${i * 35}ms` }}>
+                <button className="topic-dial__main" onClick={() => pickTopic(t.slug)}>
+                  <span className="topic-dial__circle">{t.emoji}</span>
+                  <span className="topic-dial__label">{t.label}</span>
+                </button>
+                {user && (
+                  <button className={`topic-dial__star ${followed.includes(t.slug) ? 'on' : ''}`}
+                    onClick={(e) => toggleFollow(t.slug, e)}
+                    title={followed.includes(t.slug) ? 'Unfollow topic' : 'Follow topic — adds it to your For you feed'}>
+                    <Star size={15} fill={followed.includes(t.slug) ? 'currentColor' : 'none'} />
                   </button>
-                  {user && (
-                    <button className={`topic-pill__star ${followed.includes(t.slug) ? 'on' : ''}`}
-                      onClick={(e) => toggleFollow(t.slug, e)}
-                      title={followed.includes(t.slug) ? 'Unfollow topic' : 'Follow topic — adds it to your For you feed'}>
-                      <Star size={13} fill={followed.includes(t.slug) ? 'currentColor' : 'none'} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+                )}
+              </div>
+            ))}
           </div>
         </>
       )}

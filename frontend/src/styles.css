@@ -369,20 +369,43 @@ a { color: inherit; text-decoration: none; }
   .messenger { height: calc(100vh - 112px - env(safe-area-inset-bottom)); }
 }
 
-/* ── Topic bottom sheet (opened from the bottom nav) ── */
-.topic-sheet__backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.5); }
-.topic-sheet {
-  position: fixed; left: 0; right: 0; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 71;
-  max-height: 60vh; overflow-y: auto;
-  background: var(--bg-elev); border: 1px solid var(--border); border-bottom: none;
-  border-radius: 18px 18px 0 0; padding: 16px 16px 10px;
-  animation: sheet-up .18s ease-out;
+/* ── Topic speed-dial (fans up from the bottom-nav Topics button) ── */
+.topic-dial__backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.55); }
+.topic-dial {
+  position: fixed; left: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 71;
+  display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 12px;
+  max-height: calc(100vh - 90px); overflow-y: auto; padding: 4px;
+  scrollbar-width: none;
 }
-@keyframes sheet-up { from { transform: translateY(28px); opacity: 0; } }
-.topic-sheet h3 { margin: 0 0 10px; font-size: 15px; }
-.topic-sheet .topic-pill { padding: 11px 10px; font-size: 15px; }
-/* The sheet is a mobile affordance — never show it at desktop widths. */
-@media (min-width: 821px) { .topic-sheet, .topic-sheet__backdrop { display: none; } }
+.topic-dial::-webkit-scrollbar { display: none; }
+.topic-dial__close {
+  width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; flex: none;
+  margin-left: 2px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.topic-dial__row { display: flex; align-items: center; gap: 10px; animation: dial-pop .16s ease-out backwards; }
+@keyframes dial-pop { from { opacity: 0; transform: translateY(16px) scale(.85); } }
+.topic-dial__main { display: flex; align-items: center; gap: 10px; background: none; border: none; cursor: pointer; padding: 0; font-family: inherit; }
+.topic-dial__circle {
+  width: 46px; height: 46px; border-radius: 50%; flex: none;
+  background: var(--bg-elev2); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; font-size: 20px;
+}
+.topic-dial__label {
+  background: var(--bg-elev); border: 1px solid var(--border); color: var(--text);
+  font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 10px; white-space: nowrap;
+}
+.topic-dial__row.active .topic-dial__circle { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.topic-dial__row.active .topic-dial__label { border-color: var(--accent); color: var(--accent); }
+.topic-dial__star {
+  width: 32px; height: 32px; border-radius: 50%; flex: none; cursor: pointer;
+  background: var(--bg-elev); border: 1px solid var(--border); color: var(--muted);
+  display: flex; align-items: center; justify-content: center; opacity: .85;
+}
+.topic-dial__star.on { color: #f59e0b; opacity: 1; }
+/* The dial is a mobile affordance — never show it at desktop widths. */
+@media (min-width: 821px) { .topic-dial, .topic-dial__backdrop { display: none; } }
 
 /* Own-profile header: ☰ + Edit sit in a row */
 .profile__actions--me { flex-direction: row; align-items: center; }
