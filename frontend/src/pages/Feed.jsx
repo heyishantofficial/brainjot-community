@@ -57,26 +57,36 @@ export default function Feed() {
     setUser((u) => ({ ...u, followedTopics: data.followedTopics }));
   }
 
+  // Tapping the active topic clears the filter.
+  function pickTopic(slug) {
+    const p = new URLSearchParams(params);
+    if (topic === slug) p.delete('topic'); else p.set('topic', slug);
+    setParams(p);
+  }
+
+  // Rendered twice: sidebar list (desktop) and horizontal chip strip (mobile).
+  const renderTopicPill = (t) => (
+    <div key={t.slug} className={`topic-pill ${topic === t.slug ? 'active' : ''}`}>
+      <button className="topic-pill__main" onClick={() => pickTopic(t.slug)}>
+        <span>{t.emoji}</span> {t.label}
+      </button>
+      {user && (
+        <button className={`topic-pill__star ${followed.includes(t.slug) ? 'on' : ''}`}
+          onClick={(e) => toggleFollow(t.slug, e)}
+          title={followed.includes(t.slug) ? 'Unfollow topic' : 'Follow topic — adds it to your For you feed'}>
+          <Star size={13} fill={followed.includes(t.slug) ? 'currentColor' : 'none'} />
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="feed-layout">
       <aside className="feed-side">
         <div className="side-card">
           <h3>Topics</h3>
           <div className="topic-list">
-            {topics.map((t) => (
-              <div key={t.slug} className={`topic-pill ${topic === t.slug ? 'active' : ''}`}>
-                <button className="topic-pill__main" onClick={() => { const p = new URLSearchParams(params); p.set('topic', t.slug); setParams(p); }}>
-                  <span>{t.emoji}</span> {t.label}
-                </button>
-                {user && (
-                  <button className={`topic-pill__star ${followed.includes(t.slug) ? 'on' : ''}`}
-                    onClick={(e) => toggleFollow(t.slug, e)}
-                    title={followed.includes(t.slug) ? 'Unfollow topic' : 'Follow topic — adds it to your For you feed'}>
-                    <Star size={13} fill={followed.includes(t.slug) ? 'currentColor' : 'none'} />
-                  </button>
-                )}
-              </div>
-            ))}
+            {topics.map(renderTopicPill)}
           </div>
         </div>
         <div className="side-card side-card--cta">
@@ -87,6 +97,11 @@ export default function Feed() {
       </aside>
 
       <div className="feed-main">
+        {topics.length > 0 && (
+          <div className="topic-strip">
+            {topics.map(renderTopicPill)}
+          </div>
+        )}
         <button className="mind-box" onClick={() => (user ? setComposing(true) : login())}>
           <Avatar user={user} size={40} />
           <span className="mind-box__text">Share What's Going On. Someone here might relate more than you think</span>
