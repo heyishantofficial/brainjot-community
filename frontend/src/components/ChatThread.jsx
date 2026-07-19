@@ -12,11 +12,11 @@ function formatTime(iso) {
   catch { return ''; }
 }
 
-// Polling-based DMs (no websockets on Vercel serverless). The open conversation
-// polls for messages newer than the last one it has, every ~2.5s (slower when the
-// tab is hidden). Each poll is a cheap indexed `_id > after` query that usually
-// returns nothing, so this is light enough for an MVP. When you later move the
-// backend to a websocket host, this is the one component to swap back to sockets.
+// Polling-based DMs. The open conversation polls for messages newer than the
+// last one it has, every ~2.5s (slower when the tab is hidden). Each poll is a
+// cheap indexed `_id > after` query that usually returns nothing, so this is
+// light enough for an MVP. If you later add websockets to the community
+// backend, this is the one component to swap over to sockets.
 const POLL_ACTIVE_MS = 2500;
 const POLL_HIDDEN_MS = 10000;
 

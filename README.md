@@ -10,14 +10,15 @@ main app down.
 
 ```
 brainjot-community/
-├── backend/   Node/Express + MongoDB, Vercel serverless (own DB, own deploy)
+├── backend/   Node/Express + MongoDB (own DB, own deploy)
 └── frontend/  React + Vite SPA (own deploy → community.brainjot.space)
 ```
 
-**Deployment:** two Vercel projects (static frontend + serverless backend) + a
-separate MongoDB Atlas cluster. DMs use **polling** (Vercel serverless can't hold
-websockets); the websocket path is kept as an escape hatch for when you move the
-backend to a persistent host. Full step-by-step: see [DEPLOY.md](DEPLOY.md).
+**Deployment:** two Dokploy services on the Hostinger VPS (static frontend +
+long-running Node backend) + a MongoDB database separate from the main app's.
+DMs currently use **polling**; the websocket path is kept as an escape hatch and
+is now viable since the backend is a persistent process. Full step-by-step: see
+[DEPLOY.md](DEPLOY.md).
 
 ## How auth works (SSO, near-zero load on the main app)
 
@@ -68,11 +69,11 @@ the main app's environment.
 
 ## Production deploy
 
-Full runbook with every click and env var is in **[DEPLOY.md](DEPLOY.md)**. In short:
-two Vercel projects (`community-frontend` → `community.brainjot.space`,
-`community-backend` → `api.community.brainjot.space`), a **separate** MongoDB Atlas
-cluster, and `COMMUNITY_JWT_SECRET` set to the same value on both this backend and
-the main app.
+Full runbook with every env var is in **[DEPLOY.md](DEPLOY.md)**. In short:
+two Dokploy services (`community-frontend` → `community.brainjot.space`,
+`community-backend` → `api.community.brainjot.space`), a **separate** MongoDB
+database, and `COMMUNITY_JWT_SECRET` set to the same value on both this backend
+and the main app.
 
 ## Scale foundation (why this survives growth)
 
@@ -87,13 +88,13 @@ Built so the expensive-to-reverse decisions are already correct:
 - **Idempotent voting** — a unique `{userId,target}` index makes double-votes
   impossible without read-modify-write races.
 - **Stateless backend** — sessions and rate-limits use external (Mongo/Redis)
-  stores, the Mongo connection is cached for serverless, and nothing lives in
+  stores, the Mongo connection is cached and shared, and nothing lives in
   process memory. Set `REDIS_URL` to move sessions/rate-limits to Redis when you
   scale out.
-- **Realtime escape hatch** — DMs run on polling today (Vercel constraint). To go
-  instant, move the backend to a websocket host and swap `Conversation.jsx` + the
-  header badge back to sockets; the Redis socket-adapter wiring is already in
-  `config/stores.js` + `sockets/`.
+- **Realtime escape hatch** — DMs run on polling today. To go instant, add
+  websockets to the backend and swap `Conversation.jsx` + the header badge back
+  to sockets; the Redis socket-adapter wiring is already in `config/stores.js`
+  + `sockets/`.
 
 ### What's deliberately deferred (don't over-build)
 

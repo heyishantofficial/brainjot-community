@@ -1,16 +1,14 @@
 const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 
-// ── Serverless-safe MongoDB connection ───────────────────────────────────────
-// On Vercel each function invocation may reuse a "warm" container or spin up a
-// cold one. We cache the connection promise on the global object so warm
-// invocations REUSE the existing connection instead of opening a new pool every
-// time — without this, traffic quickly exhausts Atlas's connection limit (the
-// classic serverless-Mongo failure).
+// ── Cached MongoDB connection ────────────────────────────────────────────────
+// The connection promise is cached on the global object so concurrent callers
+// (and the per-request ensure-DB gate in server.js) share ONE connection pool
+// instead of opening a new one each time. On a long-running server this mostly
+// means boot connects once and every later call resolves instantly; it also
+// lets the gate retry cleanly if the initial connect failed.
 //
 // This is a SEPARATE database (and ideally a separate cluster) from the main app.
-// maxPoolSize is kept small because each concurrent function instance holds its
-// own pool; many instances × a big pool = blown connection limit.
 let cached = global.__bjcMongoose;
 if (!cached) cached = global.__bjcMongoose = { conn: null, promise: null, listeners: false };
 
