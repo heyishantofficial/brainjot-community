@@ -97,11 +97,6 @@ export default function Feed() {
       </aside>
 
       <div className="feed-main">
-        {topics.length > 0 && (
-          <div className="topic-strip">
-            {topics.map(renderTopicPill)}
-          </div>
-        )}
         <button className="mind-box" onClick={() => (user ? setComposing(true) : login())}>
           <Avatar user={user} size={40} />
           <span className="mind-box__text">Share What's Going On. Someone here might relate more than you think</span>

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
-import { Send, Award, Ban, VolumeX, X, Pencil, Globe, Link as LinkIcon, Briefcase, GraduationCap } from 'lucide-react';
+import { Send, Award, Ban, VolumeX, X, Pencil, Globe, Link as LinkIcon, Briefcase, GraduationCap, Menu, Bookmark, ShieldCheck, ArrowLeft, LogOut } from 'lucide-react';
 import Avatar from '../components/Avatar';
 import PostCard from '../components/PostCard';
 import ProfileEditModal from '../components/ProfileEditModal';
-import { api } from '../api';
+import { api, MAIN_APP_URL } from '../api';
 import { useAuth } from '../auth';
 
 const POST_FILTERS = [
@@ -24,7 +24,7 @@ const LINK_LABELS = { website: 'Website', github: 'GitHub', twitter: 'X / Twitte
 export default function Profile() {
   const { username } = useParams();
   const navigate = useNavigate();
-  const { user, setUser, login } = useAuth();
+  const { user, setUser, login, logout } = useAuth();
   const [profile, setProfile] = useState(null);
   const [endorsements, setEndorsements] = useState([]);
   const [posts, setPosts] = useState([]);
@@ -33,6 +33,7 @@ export default function Profile() {
   const [error, setError] = useState('');
   const [newMuted, setNewMuted] = useState('');
   const [editing, setEditing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     api.get(`/users/${username}`)
@@ -122,8 +123,32 @@ export default function Profile() {
           )}
         </div>
         {isMe ? (
-          <div className="profile__actions">
+          <div className="profile__actions profile__actions--me">
+            {/* Mobile-only menu holding the actions that left the top bar. */}
+            <button className="icon-btn show-sm" onClick={() => setMenuOpen((o) => !o)} title="Menu"><Menu size={20} /></button>
             <button className="btn btn--ghost btn--sm" onClick={() => setEditing(true)}><Pencil size={14} /> Edit profile</button>
+            {menuOpen && (
+              <>
+                <div className="mobile-menu__backdrop" onClick={() => setMenuOpen(false)} />
+                <nav className="mobile-menu">
+                  <button className="mobile-menu__item" onClick={() => { setMenuOpen(false); navigate('/saved'); }}>
+                    <Bookmark size={17} /> Saved posts
+                  </button>
+                  {user.role === 'superadmin' && (
+                    <button className="mobile-menu__item" onClick={() => { setMenuOpen(false); navigate('/admin'); }}>
+                      <ShieldCheck size={17} /> Admin dashboard
+                    </button>
+                  )}
+                  <a href={MAIN_APP_URL} className="mobile-menu__item">
+                    <ArrowLeft size={17} /> Back to Projects
+                  </a>
+                  <div className="mobile-menu__sep" />
+                  <button className="mobile-menu__item" onClick={() => { setMenuOpen(false); logout(); }}>
+                    <LogOut size={17} /> Log out
+                  </button>
+                </nav>
+              </>
+            )}
           </div>
         ) : (
           <div className="profile__actions">

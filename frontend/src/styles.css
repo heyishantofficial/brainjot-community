@@ -75,8 +75,8 @@ a { color: inherit; text-decoration: none; }
 .feed-main { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .feed-side { display: flex; flex-direction: column; gap: 16px; }
 
-.feed-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.tab { display: inline-flex; align-items: center; gap: 6px; background: none; border: 1px solid transparent; color: var(--muted); padding: 8px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; font-family: inherit; }
+.feed-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.tab { display: inline-flex; align-items: center; gap: 6px; background: none; border: 1px solid transparent; color: var(--muted); padding: 8px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; font-family: inherit; white-space: nowrap; }
 .tab.active { background: var(--bg-elev); color: var(--text); border-color: var(--border); }
 .active-topic { margin-left: auto; background: var(--bg-elev2); padding: 5px 10px; border-radius: 20px; font-size: 13px; }
 .active-topic button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; }
@@ -331,8 +331,7 @@ a { color: inherit; text-decoration: none; }
    the inline form is visible again. */
 @media (min-width: 821px) { .topbar__search--overlay { display: none !important; } }
 
-/* ── Mobile hamburger menu ── */
-.menu-dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+/* ── Mobile dropdown menu (used on the Profile page) ── */
 .mobile-menu__backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.45); }
 .mobile-menu { position: fixed; top: 62px; right: 10px; z-index: 61; min-width: 230px; display: flex; flex-direction: column; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
 .mobile-menu__item { display: flex; align-items: center; gap: 11px; width: 100%; padding: 12px; border-radius: 9px; background: none; border: none; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; text-align: left; }
@@ -341,14 +340,52 @@ a { color: inherit; text-decoration: none; }
 .mobile-menu__badge { margin-left: auto; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; border-radius: 10px; padding: 1px 6px; }
 .mobile-menu__sep { height: 1px; background: var(--border); margin: 4px 8px; }
 
-/* ── Mobile topic strip (sidebar Topics as swipeable chips under the header) ── */
-.topic-strip { display: none; }
+/* ── Bottom navigation (Instagram-style, mobile only) ── */
+.bottom-nav { display: none; }
 @media (max-width: 820px) {
-  .topic-strip { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-  .topic-strip::-webkit-scrollbar { display: none; }
-  .topic-strip .topic-pill { flex: 0 0 auto; white-space: nowrap; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px; padding: 7px 12px; }
-  .topic-strip .topic-pill.active { background: var(--bg-elev2); border-color: var(--accent); }
+  .bottom-nav {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 55;
+    display: flex; align-items: stretch; height: 56px;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: rgba(15,17,21,.92); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border);
+  }
+  .bottom-nav__item {
+    position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-family: inherit; font-size: 10px; font-weight: 600; letter-spacing: .2px;
+  }
+  .bottom-nav__item.active { color: var(--text); }
+  .bottom-nav__item.active .avatar { outline: 2px solid var(--accent); }
+  .bottom-nav__badge {
+    position: absolute; top: 4px; left: calc(50% + 4px);
+    background: var(--danger); color: #fff; font-size: 10px; font-weight: 700;
+    border-radius: 10px; padding: 1px 5px; line-height: 1.3;
+  }
+
+  /* Room for the fixed nav under scrolling content and the messenger panes. */
+  .content { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+  .content--messenger { padding-bottom: 0; }
+  .messenger { height: calc(100vh - 112px - env(safe-area-inset-bottom)); }
 }
+
+/* ── Topic bottom sheet (opened from the bottom nav) ── */
+.topic-sheet__backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.5); }
+.topic-sheet {
+  position: fixed; left: 0; right: 0; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 71;
+  max-height: 60vh; overflow-y: auto;
+  background: var(--bg-elev); border: 1px solid var(--border); border-bottom: none;
+  border-radius: 18px 18px 0 0; padding: 16px 16px 10px;
+  animation: sheet-up .18s ease-out;
+}
+@keyframes sheet-up { from { transform: translateY(28px); opacity: 0; } }
+.topic-sheet h3 { margin: 0 0 10px; font-size: 15px; }
+.topic-sheet .topic-pill { padding: 11px 10px; font-size: 15px; }
+/* The sheet is a mobile affordance — never show it at desktop widths. */
+@media (min-width: 821px) { .topic-sheet, .topic-sheet__backdrop { display: none; } }
+
+/* Own-profile header: ☰ + Edit sit in a row */
+.profile__actions--me { flex-direction: row; align-items: center; }
 
 /* ── Notifications ── */
 .notif-push-banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px; margin-top: 14px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); font-size: 13.5px; }
