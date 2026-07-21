@@ -8,6 +8,8 @@ const Message = require('../models/Message');
 const Report = require('../models/Report');
 const AuditLog = require('../models/AuditLog');
 const UserActivity = require('../models/UserActivity');
+const Vote = require('../models/Vote');
+const Conversation = require('../models/Conversation');
 const { requireAuth, requireAdmin, requireAdminUnlock, adminUnlocked } = require('../middleware/auth');
 const { readLimiter, writeLimiter, makeLimiter } = require('../middleware/rateLimit');
 const { recomputePostHotScore } = require('../services/ranking');
@@ -276,6 +278,153 @@ router.get('/growth', readLimiter, async (_req, res, next) => {
         returnedWeek2,
       },
     });
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/admin/community-health — response rate, contribution pyramid,
+// creator concentration, topic heat, collab bridge funnel ───────────────────
+// All computed from raw rows pulled into memory and bucketed in JS (not
+// streaming Mongo aggregation pipelines) — fine at current scale; if
+// posts/comments/votes per window grow past ~100k this should move to
+// scheduled pre-aggregation instead of an on-demand scan.
+router.get('/community-health', readLimiter, async (req, res, next) => {
+  try {
+    const now = Date.now();
+    const thisMonday = mondayOf(new Date());
+
+    // ── Response rate: % of posts that get a first comment within 24h ──
+    const d14 = new Date(now - 14 * DAY);
+    const d7 = new Date(now - 7 * DAY);
+    // Removed content (spam, purged) shouldn't count against — or for — the
+    // community's response rate; only currently-active posts are real signal.
+    const postsWithId = await Post.find({ createdAt: { $gte: d14 }, status: 'active' }).select('createdAt').lean();
+    const postIds = postsWithId.map((p) => p._id);
+    const firstCommentRows = postIds.length ? await Comment.aggregate([
+      { $match: { postId: { $in: postIds } } },
+      { $group: { _id: '$postId', firstAt: { $min: '$createdAt' } } },
+    ]) : [];
+    const firstCommentByPost = new Map(firstCommentRows.map((r) => [String(r._id), r.firstAt]));
+    const answeredWithin24h = (p) => {
+      const fc = firstCommentByPost.get(String(p._id));
+      return !!fc && (new Date(fc).getTime() - new Date(p.createdAt).getTime()) <= DAY;
+    };
+    const dayKey = (d) => new Date(d).toISOString().slice(0, 10);
+    const byDay = {};
+    for (const p of postsWithId) {
+      const k = dayKey(p.createdAt);
+      byDay[k] = byDay[k] || { total: 0, answered: 0 };
+      byDay[k].total++;
+      if (answeredWithin24h(p)) byDay[k].answered++;
+    }
+    const responseSeries = Array.from({ length: 14 }, (_, i) => {
+      const day = new Date(d14.getTime() + i * DAY).toISOString().slice(0, 10);
+      const b = byDay[day];
+      return { day, pct: b && b.total ? Math.round((b.answered / b.total) * 100) : null, total: b?.total || 0 };
+    });
+    const posts7 = postsWithId.filter((p) => p.createdAt >= d7);
+    const answered7 = posts7.filter(answeredWithin24h).length;
+    const unansweredOpenPosts = await Post.find({ status: 'active', commentCount: 0, createdAt: { $lte: new Date(now - DAY) } })
+      .sort({ createdAt: 1 }).limit(10).select('title authorName authorUsername createdAt').lean();
+
+    const responseRate = {
+      last7dPct: posts7.length ? Math.round((answered7 / posts7.length) * 100) : null,
+      last7dTotal: posts7.length,
+      series14d: responseSeries,
+      unansweredOpenPosts: unansweredOpenPosts.map((p) => ({
+        id: String(p._id), title: p.title, authorName: p.authorName, authorUsername: p.authorUsername, createdAt: p.createdAt,
+      })),
+    };
+
+    // ── Contribution pyramid: lurkers / voters / commenters / posters, 8 weeks ──
+    const pyramidStart = new Date(thisMonday.getTime() - 7 * WEEK);
+    const [postRows, commentRows, voteRows, activityRows] = await Promise.all([
+      Post.find({ createdAt: { $gte: pyramidStart } }).select('authorId createdAt -_id').lean(),
+      Comment.find({ createdAt: { $gte: pyramidStart } }).select('authorId createdAt -_id').lean(),
+      Vote.find({ createdAt: { $gte: pyramidStart } }).select('userId createdAt -_id').lean(),
+      UserActivity.find({ weekStart: { $gte: pyramidStart } }).select('userId week -_id').lean(),
+    ]);
+    const bucketByWeek = (rows, idField, dateField) => {
+      const m = new Map();
+      for (const r of rows) {
+        const wk = weekKey(r[dateField]);
+        if (!m.has(wk)) m.set(wk, new Set());
+        m.get(wk).add(r[idField]);
+      }
+      return m;
+    };
+    const postersByWeek = bucketByWeek(postRows, 'authorId', 'createdAt');
+    const commentersByWeek = bucketByWeek(commentRows, 'authorId', 'createdAt');
+    const votersByWeek = bucketByWeek(voteRows, 'userId', 'createdAt');
+    const activeByWeek = new Map();
+    for (const r of activityRows) {
+      if (!activeByWeek.has(r.week)) activeByWeek.set(r.week, new Set());
+      activeByWeek.get(r.week).add(r.userId);
+    }
+    const weeks = Array.from({ length: 8 }, (_, i) => weekKey(new Date(thisMonday.getTime() - (7 - i) * WEEK)));
+    const pyramid = weeks.map((wk) => {
+      const active = activeByWeek.get(wk) || new Set();
+      const posters = postersByWeek.get(wk) || new Set();
+      const commenters = commentersByWeek.get(wk) || new Set();
+      const voters = votersByWeek.get(wk) || new Set();
+      const contributors = new Set([...posters, ...commenters]);
+      const commentersOnly = new Set([...commenters].filter((id) => !posters.has(id)));
+      const votersOnly = new Set([...voters].filter((id) => !contributors.has(id)));
+      const lurkers = new Set([...active].filter((id) => !contributors.has(id) && !voters.has(id)));
+      return { week: wk, activeTotal: active.size, lurkers: lurkers.size, voters: votersOnly.size, commenters: commentersOnly.size, posters: posters.size };
+    });
+
+    // ── Creator concentration: last 30 days ──
+    const d30 = new Date(now - 30 * DAY);
+    const [postAuthorRows, commentAuthorRows] = await Promise.all([
+      Post.aggregate([{ $match: { createdAt: { $gte: d30 } } }, { $group: { _id: '$authorId', n: { $sum: 1 }, name: { $first: '$authorName' } } }]),
+      Comment.aggregate([{ $match: { createdAt: { $gte: d30 } } }, { $group: { _id: '$authorId', n: { $sum: 1 }, name: { $first: '$authorName' } } }]),
+    ]);
+    const totals = new Map();
+    const names = new Map();
+    for (const r of [...postAuthorRows, ...commentAuthorRows]) {
+      totals.set(r._id, (totals.get(r._id) || 0) + r.n);
+      if (!names.has(r._id)) names.set(r._id, r.name);
+    }
+    const sortedCreators = [...totals.entries()].sort((a, b) => b[1] - a[1]);
+    const totalContent = sortedCreators.reduce((s, [, n]) => s + n, 0);
+    const top10Count = sortedCreators.length ? Math.max(1, Math.ceil(sortedCreators.length * 0.1)) : 0;
+    const top10Sum = sortedCreators.slice(0, top10Count).reduce((s, [, n]) => s + n, 0);
+    const concentration = {
+      windowDays: 30,
+      uniqueCreators: sortedCreators.length,
+      totalContent,
+      top10SharePct: totalContent ? Math.round((top10Sum / totalContent) * 100) : null,
+      topCreators: sortedCreators.slice(0, 10).map(([id, n]) => ({ authorId: id, name: names.get(id) || id, count: n })),
+    };
+
+    // ── Topic heat: last 30 days ──
+    const topicAgg = await Post.aggregate([
+      { $match: { createdAt: { $gte: d30 }, status: 'active' } },
+      { $unwind: { path: '$topics', preserveNullAndEmptyArrays: false } },
+      { $group: { _id: '$topics', posts: { $sum: 1 }, engagement: { $sum: { $add: ['$score', '$commentCount'] } } } },
+      { $sort: { posts: -1 } },
+      { $limit: 15 },
+    ]);
+    const topicHeat = topicAgg.map((t) => ({
+      topic: t._id, posts: t.posts, engagement: t.engagement,
+      avgEngagement: t.posts ? +(t.engagement / t.posts).toFixed(1) : 0,
+    }));
+
+    // ── Bridge funnel: collab requests → accepted (the community→app loop).
+    // The third real step — an accepted collaborator being invited into a
+    // main-app project — happens on the MAIN APP and leaves no record here;
+    // it's tracked going forward via the invite_sent PostHog event instead. ──
+    const [collabRequestsSent, collabRequestsAccepted] = await Promise.all([
+      Conversation.countDocuments({ kind: 'collab' }),
+      Conversation.countDocuments({ kind: 'collab', status: 'active' }),
+    ]);
+    const bridgeFunnel = {
+      collabRequestsSent,
+      collabRequestsAccepted,
+      acceptanceRatePct: collabRequestsSent ? Math.round((collabRequestsAccepted / collabRequestsSent) * 100) : null,
+    };
+
+    res.json({ responseRate, pyramid, concentration, topicHeat, bridgeFunnel });
   } catch (err) { next(err); }
 });
 

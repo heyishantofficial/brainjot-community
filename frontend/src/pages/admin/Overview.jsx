@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api';
+import InfoTip from '../../components/InfoTip';
 
 function fmtDay(day) {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -81,13 +82,13 @@ function GrowthSection({ growth }) {
     <>
       <h3 className="admin-section-title">Growth — week of {a.weekOf}</h3>
       <div className="stat-grid">
-        <div className="stat-tile"><div className="stat-tile__label">Active this week</div><div className="stat-tile__value">{a.activeThisWeek}</div><span className="stat-tile__delta muted">{a.activeLastWeek} last week</span></div>
-        <div className="stat-tile"><div className="stat-tile__label">New</div><div className="stat-tile__value">{a.new}</div></div>
-        <div className="stat-tile"><div className="stat-tile__label">Retained</div><div className="stat-tile__value">{a.retained}</div></div>
-        <div className="stat-tile"><div className="stat-tile__label">Resurrected</div><div className="stat-tile__value">{a.resurrected}</div></div>
-        <div className="stat-tile"><div className="stat-tile__label">Churned</div><div className="stat-tile__value">{a.churned}</div></div>
+        <div className="stat-tile"><div className="stat-tile__label">Active this week <InfoTip text="Unique users who took any action this week. The base number everything else here is measured against." /></div><div className="stat-tile__value">{a.activeThisWeek}</div><span className="stat-tile__delta muted">{a.activeLastWeek} last week</span></div>
+        <div className="stat-tile"><div className="stat-tile__label">New <InfoTip text="Users who joined this week — the top of the funnel." /></div><div className="stat-tile__value">{a.new}</div></div>
+        <div className="stat-tile"><div className="stat-tile__label">Retained <InfoTip text="Active last week AND this week — your durable base." /></div><div className="stat-tile__value">{a.retained}</div></div>
+        <div className="stat-tile"><div className="stat-tile__label">Resurrected <InfoTip text="Joined before last week, inactive last week, back this week — proof the community is worth returning to." /></div><div className="stat-tile__value">{a.resurrected}</div></div>
+        <div className="stat-tile"><div className="stat-tile__label">Churned <InfoTip text="Active last week, gone this week. Watch this rise before total activity falls." /></div><div className="stat-tile__value">{a.churned}</div></div>
         <div className="stat-tile">
-          <div className="stat-tile__label">Quick ratio</div>
+          <div className="stat-tile__label">Quick ratio <InfoTip text="(New + Resurrected) ÷ Churned. Below 1 means you're losing engaged users faster than gaining them — fix retention before pushing growth." /></div>
           <div className="stat-tile__value">{a.quickRatio == null ? '—' : a.quickRatio}</div>
           <span className={`stat-tile__delta ${a.quickRatio == null ? 'muted' : a.quickRatio >= 1 ? 'delta--up' : 'delta--down'}`}>(new+resurrected) / churned</span>
         </div>

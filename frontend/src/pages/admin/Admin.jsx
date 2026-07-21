@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Navigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Flag, Users, ShieldCheck, Lock, ScrollText } from 'lucide-react';
+import { LayoutDashboard, Flag, Users, ShieldCheck, Lock, ScrollText, HeartPulse } from 'lucide-react';
 import { useAuth } from '../../auth';
 import { api } from '../../api';
 
@@ -97,6 +97,7 @@ export default function Admin() {
         <nav className="admin__tabs">
           <NavLink end to="/admin" className={tab}><LayoutDashboard size={15} /> Overview</NavLink>
           <NavLink to="/admin/moderation" className={tab}><Flag size={15} /> Moderation</NavLink>
+          <NavLink to="/admin/health" className={tab}><HeartPulse size={15} /> Community Health</NavLink>
           <NavLink to="/admin/users" className={tab}><Users size={15} /> Users</NavLink>
           <NavLink to="/admin/audit" className={tab}><ScrollText size={15} /> Audit</NavLink>
         </nav>
